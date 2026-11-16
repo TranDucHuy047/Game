@@ -1,0 +1,26 @@
+name: Request Unity Activation File (.alf)
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/request-unity-license.yml'
+
+jobs:
+  requestManualActivation:
+    name: Generate Unity Activation File (.alf)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Request manual activation file from Unity
+        id: get-manual-license-file
+        uses: game-ci/unity-request-activation-file@v2
+        with:
+          unityVersion: 2022.3.50f1
+
+      - name: Upload .alf Activation File
+        uses: actions/upload-artifact@v4
+        with:
+          name: Unity-Activation-File-ALF
+          path: ${{ steps.get-manual-license-file.outputs.filePath }}
+          retention-days: 7
