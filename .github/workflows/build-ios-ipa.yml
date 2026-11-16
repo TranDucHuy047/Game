@@ -30,12 +30,34 @@ jobs:
           restore-keys: |
             Library-iOS-
 
+      - name: Sanitize Unity Credentials
+        shell: bash
+        env:
+          RAW_LICENSE: ${{ secrets.UNITY_LICENSE }}
+          RAW_EMAIL: ${{ secrets.UNITY_EMAIL }}
+          RAW_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+        run: |
+          CLEAN_EMAIL=$(printf '%s' "$RAW_EMAIL" | tr -d '\r\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+          CLEAN_PASS=$(printf '%s' "$RAW_PASSWORD" | tr -d '\r\n')
+          CLEAN_LIC=$(printf '%s' "$RAW_LICENSE" | tr -d '\r')
+
+          if [ -n "$CLEAN_EMAIL" ]; then echo "::add-mask::$CLEAN_EMAIL"; fi
+          if [ -n "$CLEAN_PASS" ]; then echo "::add-mask::$CLEAN_PASS"; fi
+
+          echo "CLEAN_UNITY_EMAIL=$CLEAN_EMAIL" >> "$GITHUB_ENV"
+          echo "CLEAN_UNITY_PASSWORD=$CLEAN_PASS" >> "$GITHUB_ENV"
+          {
+            echo "CLEAN_UNITY_LICENSE<<__UNITY_LIC_EOF__"
+            printf '%s\n' "$CLEAN_LIC"
+            echo "__UNITY_LIC_EOF__"
+          } >> "$GITHUB_ENV"
+
       - name: Export iOS Xcode Project from Unity
         uses: game-ci/unity-builder@v4
         env:
-          UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
-          UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
-          UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+          UNITY_LICENSE: ${{ env.CLEAN_UNITY_LICENSE }}
+          UNITY_EMAIL: ${{ env.CLEAN_UNITY_EMAIL }}
+          UNITY_PASSWORD: ${{ env.CLEAN_UNITY_PASSWORD }}
           UNITY_SERIAL: ${{ secrets.UNITY_SERIAL }}
         with:
           unityVersion: 2022.3.50f1
