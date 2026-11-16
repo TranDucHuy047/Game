@@ -28,6 +28,10 @@ jobs:
           restore-keys: |
             Library-iOS-
 
+      - name: Clear Stale Bee DAG And Shader Cache
+        shell: bash
+        run: rm -rf Library/Bee Library/ShaderCache
+
       - name: Sanitize Unity Credentials
         shell: bash
         env:

@@ -14,7 +14,7 @@ Shader "CoralArchipelago/URP/CoralOceanWaterURP"
         _WaveSpeed ("Wave Speed", Range(0.1, 4.0)) = 1.25
         _WaveSteepness ("Gerstner Steepness", Range(0.05, 0.65)) = 0.35
 
-        [Header(Shoreline Foam & Night BioGlow)]
+        [Header(Shoreline Foam And Night BioGlow)]
         [HDR] _BiolumFoamColor ("Bioluminescent Glow Color", Color) = (0.12, 1.90, 2.55, 1.0)
         _DayFoamColor ("Day Shoreline Foam", Color) = (0.95, 0.99, 1.0, 1.0)
         _ShoreFoamDistance ("Shoreline Foam Width", Range(0.1, 4.5)) = 1.65

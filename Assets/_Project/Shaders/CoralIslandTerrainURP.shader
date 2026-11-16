@@ -12,7 +12,7 @@ Shader "CoralArchipelago/URP/CoralIslandTerrainURP"
         _LushGrassColor ("Lush Grass Accent", Color) = (0.26, 0.68, 0.32, 1)
         _GrassMaxHeight ("Rock Transition Height", Float) = 4.6
 
-        [Header(Volcanic Cliff & Night BioGlow)]
+        [Header(Volcanic Cliff And Night BioGlow)]
         _RockColor ("Volcanic Cliff Color", Color) = (0.24, 0.26, 0.32, 1)
         [HDR] _BioVeinColor ("Night Rock Vein Glow", Color) = (0.06, 1.15, 1.50, 1)
         _SlopeThreshold ("Cliff Slope Threshold", Range(0.3, 0.95)) = 0.76
@@ -171,9 +171,24 @@ Shader "CoralArchipelago/URP/CoralIslandTerrainURP"
             HLSLPROGRAM
             #pragma vertex ShadowVert
             #pragma fragment ShadowFrag
+            #pragma multi_compile_instancing
 
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
+            #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/CommonMaterial.hlsl"
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Shadows.hlsl"
+
+            CBUFFER_START(UnityPerMaterial)
+                half4 _SandColor;
+                half4 _WetSandColor;
+                float _SandMaxHeight;
+                half4 _GrassColor;
+                half4 _LushGrassColor;
+                float _GrassMaxHeight;
+                half4 _RockColor;
+                half4 _BioVeinColor;
+                half _SlopeThreshold;
+                half _BlendSharpness;
+            CBUFFER_END
 
             float3 _LightDirection;
 
@@ -181,6 +196,7 @@ Shader "CoralArchipelago/URP/CoralIslandTerrainURP"
             {
                 float4 positionOS : POSITION;
                 float3 normalOS : NORMAL;
+                UNITY_VERTEX_INPUT_INSTANCE_ID
             };
 
             struct Varyings
@@ -191,6 +207,7 @@ Shader "CoralArchipelago/URP/CoralIslandTerrainURP"
             Varyings ShadowVert(Attributes input)
             {
                 Varyings output;
+                UNITY_SETUP_INSTANCE_ID(input);
                 float3 posWS = TransformObjectToWorld(input.positionOS.xyz);
                 float3 normalWS = TransformObjectToWorldNormal(input.normalOS);
                 float4 posCS = TransformWorldToHClip(ApplyShadowBias(posWS, normalWS, _LightDirection));
@@ -221,12 +238,27 @@ Shader "CoralArchipelago/URP/CoralIslandTerrainURP"
             HLSLPROGRAM
             #pragma vertex DepthVert
             #pragma fragment DepthFrag
+            #pragma multi_compile_instancing
 
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
+
+            CBUFFER_START(UnityPerMaterial)
+                half4 _SandColor;
+                half4 _WetSandColor;
+                float _SandMaxHeight;
+                half4 _GrassColor;
+                half4 _LushGrassColor;
+                float _GrassMaxHeight;
+                half4 _RockColor;
+                half4 _BioVeinColor;
+                half _SlopeThreshold;
+                half _BlendSharpness;
+            CBUFFER_END
 
             struct Attributes
             {
                 float4 positionOS : POSITION;
+                UNITY_VERTEX_INPUT_INSTANCE_ID
             };
 
             struct Varyings
@@ -237,6 +269,7 @@ Shader "CoralArchipelago/URP/CoralIslandTerrainURP"
             Varyings DepthVert(Attributes input)
             {
                 Varyings output;
+                UNITY_SETUP_INSTANCE_ID(input);
                 output.positionCS = TransformObjectToHClip(input.positionOS.xyz);
                 return output;
             }
