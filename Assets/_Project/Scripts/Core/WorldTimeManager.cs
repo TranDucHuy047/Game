@@ -71,6 +71,32 @@ namespace CoralArchipelago.Core
                 return;
             }
             Instance = this;
+            EnsureDefaultDayNightGradient();
+        }
+
+        private void EnsureDefaultDayNightGradient()
+        {
+            if (sunColorOverDay != null && sunColorOverDay.colorKeys != null && sunColorOverDay.colorKeys.Length > 2)
+                return;
+
+            sunColorOverDay = new Gradient
+            {
+                colorKeys = new[]
+                {
+                    new GradientColorKey(new Color(0.24f, 0.42f, 0.78f), 0.00f), // Midnight moonlight
+                    new GradientColorKey(new Color(1.00f, 0.62f, 0.30f), 0.24f), // Dawn golden-orange
+                    new GradientColorKey(new Color(1.00f, 0.94f, 0.84f), 0.34f), // Morning tropical sun
+                    new GradientColorKey(new Color(1.00f, 0.98f, 0.94f), 0.52f), // Clear noon
+                    new GradientColorKey(new Color(1.00f, 0.42f, 0.34f), 0.74f), // Crimson-violet sunset
+                    new GradientColorKey(new Color(0.22f, 0.40f, 0.76f), 0.83f), // Deep night blue
+                    new GradientColorKey(new Color(0.24f, 0.42f, 0.78f), 1.00f)
+                },
+                alphaKeys = new[]
+                {
+                    new GradientAlphaKey(1f, 0f),
+                    new GradientAlphaKey(1f, 1f)
+                }
+            };
         }
 
         public override void OnNetworkSpawn()
@@ -190,20 +216,28 @@ namespace CoralArchipelago.Core
 
             if (directionalSunLight != null)
             {
-                // 06:00 -> 0 deg (sunrise), 12:00 -> 90 deg (noon), 18:00 -> 180 deg (sunset)
-                float sunAngle = (normalizedDay * 360f) - 90f;
-                directionalSunLight.transform.rotation = Quaternion.Euler(sunAngle, 170f, 0f);
+                bool isDay = hourOfDay >= 5.5f && hourOfDay <= 18.5f;
+                float elevationAngle;
+                if (isDay)
+                {
+                    float dayT = Mathf.InverseLerp(5.5f, 18.5f, hourOfDay);
+                    elevationAngle = Mathf.Lerp(10f, 170f, dayT);
+                    directionalSunLight.intensity = Mathf.Lerp(0.45f, 1.50f, Mathf.Sin(dayT * Mathf.PI));
+                }
+                else
+                {
+                    float nightHours = hourOfDay > 18.5f ? (hourOfDay - 18.5f) : (hourOfDay + 5.5f);
+                    float nightT = Mathf.Clamp01(nightHours / 11.0f);
+                    elevationAngle = Mathf.Lerp(28f, 148f, nightT);
+                    directionalSunLight.intensity = 0.38f;
+                }
+
+                directionalSunLight.transform.rotation = Quaternion.Euler(elevationAngle, 165f, 0f);
 
                 if (sunColorOverDay != null && sunColorOverDay.colorKeys.Length > 0)
                 {
                     directionalSunLight.color = sunColorOverDay.Evaluate(normalizedDay);
                 }
-
-                // Smoothly dim sun at night and boost moonlight slightly for crisp iPhone OLED contrast
-                bool isDay = hourOfDay >= 5.5f && hourOfDay <= 18.5f;
-                directionalSunLight.intensity = isDay
-                    ? Mathf.Lerp(0.25f, 1.35f, Mathf.Sin(Mathf.InverseLerp(5.5f, 18.5f, hourOfDay) * Mathf.PI))
-                    : 0.22f;
             }
         }
     }

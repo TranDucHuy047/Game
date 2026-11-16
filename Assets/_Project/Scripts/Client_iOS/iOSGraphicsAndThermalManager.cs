@@ -16,8 +16,8 @@ namespace CoralArchipelago.ClientIOS
 
     /// <summary>
     /// Apple Silicon (iPhone) Graphics & Thermal Protection Manager.
-    /// Runs at 60 FPS with 75% URP RenderScale (for MetalFX Upscaling) under Nominal heat,
-    /// and dynamically scales down renderScale, shadowDistance, and VFX density if iOS reports Fair/Serious/Critical heat.
+    /// Locks crisp Retina RenderScale = 1.0f with 4x MSAA under Nominal/Fair heat,
+    /// and gently scales down to 0.80f only if iOS reaches Serious/Critical thermal throttling.
     /// </summary>
     public class iOSGraphicsAndThermalManager : MonoBehaviour
     {
@@ -27,16 +27,16 @@ namespace CoralArchipelago.ClientIOS
         [SerializeField] private float pollIntervalSeconds = 5f;
         [SerializeField] private int nominalTargetFps = 60;
 
-        [Header("URP Render Scale Tiers (Combine with MetalFX in URP Asset)")]
-        [SerializeField] private float nominalRenderScale = 0.75f;
-        [SerializeField] private float fairRenderScale = 0.68f;
-        [SerializeField] private float seriousRenderScale = 0.60f;
-        [SerializeField] private float criticalRenderScale = 0.50f;
+        [Header("URP Retina Render Scale Tiers")]
+        [SerializeField] private float nominalRenderScale = 1.0f;
+        [SerializeField] private float fairRenderScale = 1.0f;
+        [SerializeField] private float seriousRenderScale = 0.80f;
+        [SerializeField] private float criticalRenderScale = 0.80f;
 
         [Header("Shadow Distance Tiers")]
-        [SerializeField] private float nominalShadowDistance = 55f;
-        [SerializeField] private float fairShadowDistance = 40f;
-        [SerializeField] private float seriousShadowDistance = 24f;
+        [SerializeField] private float nominalShadowDistance = 65f;
+        [SerializeField] private float fairShadowDistance = 50f;
+        [SerializeField] private float seriousShadowDistance = 30f;
 
         private static readonly int ThermalVfxMultiplierId = Shader.PropertyToID("_ThermalVFXMultiplier");
 
@@ -115,36 +115,40 @@ namespace CoralArchipelago.ClientIOS
                     {
                         urp.renderScale = nominalRenderScale;
                         urp.shadowDistance = nominalShadowDistance;
+                        urp.msaaSampleCount = 4;
                     }
                     break;
 
                 case AppleThermalLevel.Fair:
                     Application.targetFrameRate = nominalTargetFps;
-                    Shader.SetGlobalFloat(ThermalVfxMultiplierId, 0.75f);
+                    Shader.SetGlobalFloat(ThermalVfxMultiplierId, 0.85f);
                     if (urp != null)
                     {
                         urp.renderScale = fairRenderScale;
                         urp.shadowDistance = fairShadowDistance;
+                        urp.msaaSampleCount = 4;
                     }
                     break;
 
                 case AppleThermalLevel.Serious:
                     Application.targetFrameRate = 45;
-                    Shader.SetGlobalFloat(ThermalVfxMultiplierId, 0.45f);
+                    Shader.SetGlobalFloat(ThermalVfxMultiplierId, 0.55f);
                     if (urp != null)
                     {
                         urp.renderScale = seriousRenderScale;
                         urp.shadowDistance = seriousShadowDistance;
+                        urp.msaaSampleCount = 2;
                     }
                     break;
 
                 case AppleThermalLevel.Critical:
                     Application.targetFrameRate = 30;
-                    Shader.SetGlobalFloat(ThermalVfxMultiplierId, 0.2f);
+                    Shader.SetGlobalFloat(ThermalVfxMultiplierId, 0.30f);
                     if (urp != null)
                     {
                         urp.renderScale = criticalRenderScale;
                         urp.shadowDistance = 0f;
+                        urp.msaaSampleCount = 1; // 1 = MSAA Disabled in URP
                     }
                     break;
             }

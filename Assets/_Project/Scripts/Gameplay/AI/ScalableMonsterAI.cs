@@ -1,9 +1,11 @@
+using System.Collections;
 using Unity.Netcode;
 using UnityEngine;
 using UnityEngine.AI;
 using CoralArchipelago.ClientIOS;
 using CoralArchipelago.Core;
 using CoralArchipelago.Gameplay.Player;
+using CoralArchipelago.Gameplay.Visuals;
 using CoralArchipelago.Networking;
 
 namespace CoralArchipelago.Gameplay.AI
@@ -49,6 +51,8 @@ namespace CoralArchipelago.Gameplay.AI
             80f, NetworkVariableReadPermission.Everyone, NetworkVariableWritePermission.Server);
 
         private NavMeshAgent _agent;
+        private CharacterAnimationSync _animSync;
+        private Coroutine _deathHideCoroutine;
         private Vector3 _spawnOrigin;
         private Vector3 _patrolTarget;
         private float _currentDamage;
@@ -61,6 +65,7 @@ namespace CoralArchipelago.Gameplay.AI
         private void Awake()
         {
             _agent = GetComponent<NavMeshAgent>();
+            _animSync = GetComponent<CharacterAnimationSync>();
             if (visualRoot == null)
                 visualRoot = gameObject;
             if (monsterCollider == null)
@@ -292,6 +297,7 @@ namespace CoralArchipelago.Gameplay.AI
             if (_attackTimer <= 0f)
             {
                 _attackTimer = attackCooldown;
+                PlayMonsterAttackClientRpc();
                 _targetPlayer.TakeDamageServer(_currentDamage);
             }
         }
@@ -377,7 +383,38 @@ namespace CoralArchipelago.Gameplay.AI
 
         private void HandleStateChanged(MonsterState previous, MonsterState next)
         {
-            ApplyAliveVisuals(next != MonsterState.Dead);
+            if (next == MonsterState.Dead)
+            {
+                if (monsterCollider != null)
+                    monsterCollider.enabled = false;
+
+                _animSync?.SetDead(true);
+
+                if (_deathHideCoroutine != null)
+                    StopCoroutine(_deathHideCoroutine);
+                _deathHideCoroutine = StartCoroutine(HideVisualAfterDeathDelay());
+            }
+            else
+            {
+                if (_deathHideCoroutine != null)
+                {
+                    StopCoroutine(_deathHideCoroutine);
+                    _deathHideCoroutine = null;
+                }
+
+                _animSync?.SetDead(false);
+                ApplyAliveVisuals(true);
+            }
+        }
+
+        private IEnumerator HideVisualAfterDeathDelay()
+        {
+            yield return new WaitForSeconds(0.95f);
+            if (CurrentState.Value == MonsterState.Dead)
+            {
+                ApplyAliveVisuals(false);
+            }
+            _deathHideCoroutine = null;
         }
 
         private void ApplyAliveVisuals(bool alive)
@@ -401,8 +438,19 @@ namespace CoralArchipelago.Gameplay.AI
         }
 
         [ClientRpc]
+        private void PlayMonsterAttackClientRpc()
+        {
+            _animSync?.PlayAttack();
+        }
+
+        [ClientRpc]
         private void PlayMonsterHitClientRpc(float damageTaken, bool killed)
         {
+            if (!killed)
+            {
+                _animSync?.PlayHit();
+            }
+
             if (CombatFeedbackManager.Instance == null)
                 return;
 

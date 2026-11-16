@@ -7,6 +7,7 @@ using CoralArchipelago.Gameplay.Building;
 using CoralArchipelago.Gameplay.Harvesting;
 using CoralArchipelago.Gameplay.Inventory;
 using CoralArchipelago.Gameplay.Onboarding;
+using CoralArchipelago.Gameplay.Visuals;
 using CoralArchipelago.Networking;
 using CoralArchipelago.Persistence;
 
@@ -53,6 +54,7 @@ namespace CoralArchipelago.Gameplay.Player
         private CharacterController _characterController;
         private PlayerInventory _inventory;
         private PlayerOnboardingController _onboarding;
+        private CharacterAnimationSync _animSync;
 
         // Server movement state
         private Vector2 _serverMoveInput;
@@ -76,6 +78,7 @@ namespace CoralArchipelago.Gameplay.Player
             _characterController = GetComponent<CharacterController>();
             _inventory = GetComponent<PlayerInventory>();
             _onboarding = GetComponent<PlayerOnboardingController>();
+            _animSync = GetComponent<CharacterAnimationSync>();
         }
 
         public override void OnNetworkSpawn()
@@ -372,6 +375,7 @@ namespace CoralArchipelago.Gameplay.Player
                 return;
 
             _serverActionTimer = actionCooldown;
+            PlayPlayerAttackClientRpc();
 
             Vector3 center = transform.position + Vector3.up * 1.0f + forwardDir.normalized * (actionRange * 0.5f);
             Collider[] hits = Physics.OverlapSphere(center, actionRange * 0.6f);
@@ -420,6 +424,18 @@ namespace CoralArchipelago.Gameplay.Player
             SplitSaveManager.Instance?.SavePlayerByClientId(OwnerClientId, removeFromActiveCache: false);
         }
 
+        [ClientRpc]
+        private void PlayPlayerAttackClientRpc()
+        {
+            _animSync?.PlayAttack();
+        }
+
+        [ClientRpc]
+        private void PlayPlayerHitClientRpc()
+        {
+            _animSync?.PlayHit();
+        }
+
         #endregion
 
         #region Server Health & Save Export
@@ -442,7 +458,11 @@ namespace CoralArchipelago.Gameplay.Player
                 return;
 
             CurrentHP.Value = Mathf.Max(0f, CurrentHP.Value - damage);
-            if (CurrentHP.Value <= 0f)
+            if (CurrentHP.Value > 0f)
+            {
+                PlayPlayerHitClientRpc();
+            }
+            else
             {
                 // PvE friendly respawn on the coral beach
                 _characterController.enabled = false;

@@ -181,7 +181,11 @@ namespace CoralArchipelago.Gameplay.Harvesting
                 return;
 
             CombatFeedbackManager.Instance.TriggerHaptic(yieldGranted > 0 ? 1 : 0);
-            CombatFeedbackManager.Instance.PlayTargetPunch(visualRoot != null ? visualRoot.transform : transform);
+            Transform targetTf = visualRoot != null ? visualRoot.transform : transform;
+            if (resourceItemId == "coral_wood")
+                CombatFeedbackManager.Instance.PlayFoliageShake(targetTf);
+            else
+                CombatFeedbackManager.Instance.PlayTargetPunch(targetTf);
 
             string popupText = yieldGranted > 0
                 ? $"+{yieldGranted} {resourceItemId}"

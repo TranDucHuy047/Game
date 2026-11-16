@@ -19,6 +19,7 @@ namespace CoralArchipelago.ClientIOS
         [Header("UI References")]
         [SerializeField] private GameObject overlayRoot;
         [SerializeField] private Text diagnosticsText;
+        [SerializeField] private Text toggleButtonLabel;
         [SerializeField] private float refreshIntervalSeconds = 0.35f;
 
         private float _fpsAccumulator;
@@ -86,8 +87,15 @@ namespace CoralArchipelago.ClientIOS
 
         public void OnClickToggleOverlay()
         {
-            if (overlayRoot != null)
-                overlayRoot.SetActive(!overlayRoot.activeSelf);
+            if (overlayRoot == null)
+                return;
+
+            bool nextState = !overlayRoot.activeSelf;
+            overlayRoot.SetActive(nextState);
+            if (toggleButtonLabel != null)
+            {
+                toggleButtonLabel.text = nextState ? "Debug [-]" : "Debug [+]";
+            }
         }
 
         public void OnClickSimulateAddPlayer()

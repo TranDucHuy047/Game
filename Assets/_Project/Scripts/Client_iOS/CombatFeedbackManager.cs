@@ -132,6 +132,36 @@ namespace CoralArchipelago.ClientIOS
             StartCoroutine(PunchRoutine(target));
         }
 
+        public void PlayFoliageShake(Transform target)
+        {
+            if (target == null || _activePunches.Contains(target))
+                return;
+
+            StartCoroutine(ShakeRoutine(target));
+        }
+
+        private IEnumerator ShakeRoutine(Transform target)
+        {
+            _activePunches.Add(target);
+            Quaternion originalRot = target.localRotation;
+
+            float elapsed = 0f;
+            const float duration = 0.28f;
+            while (elapsed < duration && target != null)
+            {
+                elapsed += Time.deltaTime;
+                float t = Mathf.Clamp01(elapsed / duration);
+                float angle = Mathf.Sin(t * Mathf.PI * 5f) * (1f - t) * 7.5f;
+                target.localRotation = originalRot * Quaternion.Euler(angle, 0f, angle * 0.6f);
+                yield return null;
+            }
+
+            if (target != null)
+                target.localRotation = originalRot;
+
+            _activePunches.Remove(target);
+        }
+
         private IEnumerator PunchRoutine(Transform target)
         {
             _activePunches.Add(target);
