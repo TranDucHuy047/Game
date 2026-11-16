@@ -17,6 +17,7 @@ using UnityEngine.Rendering;
 using UnityEngine.Rendering.Universal;
 using UnityEngine.SceneManagement;
 using UnityEngine.UI;
+using Object = UnityEngine.Object;
 using CoralArchipelago.ClientIOS;
 using CoralArchipelago.Core;
 using CoralArchipelago.Gameplay.AI;
@@ -548,7 +549,10 @@ namespace CoralArchipelago.EditorTools
             nm.NetworkConfig.EnableSceneManagement = true;
             nm.NetworkConfig.PlayerPrefab = playerPrefab;
             nm.NetworkConfig.TickRate = 30;
-            nm.NetworkConfig.Prefabs.Add(netPrefabsList);
+            foreach (NetworkPrefab np in netPrefabsList.PrefabList)
+            {
+                nm.NetworkConfig.Prefabs.Add(np);
+            }
             EditorUtility.SetDirty(nm);
 
             var serverMgrs = new GameObject("ServerManagers");
