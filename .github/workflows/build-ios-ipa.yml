@@ -1,0 +1,86 @@
+name: Build iOS App (.ipa)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, master]
+
+jobs:
+  build-ios-ipa:
+    name: Build Unity iOS & Package .ipa
+    runs-on: macos-14
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Validate Unity License Secrets
+        shell: bash
+        run: |
+          if [ -z "${{ secrets.UNITY_LICENSE }}" ] && [ -z "${{ secrets.UNITY_EMAIL }}" ]; then
+            echo "::error::Missing Unity license secrets! Add UNITY_LICENSE (or UNITY_EMAIL + UNITY_PASSWORD + UNITY_SERIAL) in GitHub Repository Settings -> Secrets and variables -> Actions."
+            exit 1
+          fi
+
+      - name: Cache Unity Library
+        uses: actions/cache@v4
+        with:
+          path: Library
+          key: Library-iOS-${{ hashFiles('Packages/manifest.json') }}
+          restore-keys: |
+            Library-iOS-
+
+      - name: Export iOS Xcode Project from Unity
+        uses: game-ci/unity-builder@v4
+        env:
+          UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
+          UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
+          UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+          UNITY_SERIAL: ${{ secrets.UNITY_SERIAL }}
+        with:
+          unityVersion: 2022.3.50f1
+          targetPlatform: iOS
+          buildMethod: CoralArchipelago.EditorTools.CoralProjectAutoBuilder.BuildiOSXcodeFromCLI
+          buildsPath: build
+
+      - name: Compile Xcode Project & Package Unsigned .ipa (for Sideloadly / Xcode)
+        shell: bash
+        run: |
+          set -euo pipefail
+          XCODEPROJ=$(find build -maxdepth 4 -name "Unity-iPhone.xcodeproj" | head -n 1)
+          if [ -z "$XCODEPROJ" ]; then
+            echo "::error::Unity-iPhone.xcodeproj not found under build/"
+            exit 1
+          fi
+
+          echo "Found Xcode project: $XCODEPROJ"
+          xcodebuild \
+            -project "$XCODEPROJ" \
+            -scheme Unity-iPhone \
+            -configuration Release \
+            -sdk iphoneos \
+            -archivePath build/CoralArchipelago.xcarchive \
+            archive \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            ARCHS=arm64 \
+            ONLY_ACTIVE_ARCH=NO
+
+          APP_PATH=$(find build/CoralArchipelago.xcarchive/Products/Applications -maxdepth 1 -name "*.app" | head -n 1)
+          if [ -z "$APP_PATH" ]; then
+            echo "::error::Compiled .app bundle not found in archive!"
+            exit 1
+          fi
+
+          mkdir -p build/ipa_staging/Payload
+          cp -R "$APP_PATH" build/ipa_staging/Payload/
+          (cd build/ipa_staging && zip -qr ../CoralArchipelago_iOS.ipa Payload)
+          ls -lh build/CoralArchipelago_iOS.ipa
+
+      - name: Upload CoralArchipelago_iOS.ipa Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: CoralArchipelago-iOS-IPA
+          path: build/CoralArchipelago_iOS.ipa
+          retention-days: 14

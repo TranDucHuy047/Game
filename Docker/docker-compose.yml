@@ -1,0 +1,22 @@
+services:
+  coral-dedicated-server:
+    build:
+      context: ..
+      dockerfile: Docker/Dockerfile
+    container_name: coral_archipelago_server
+    restart: unless-stopped
+    # Allow 30s graceful shutdown so SplitSaveManager flushes world_save.json & players/*.json on SIGTERM
+    stop_grace_period: 30s
+    ports:
+      - "7777:7777/udp"
+    environment:
+      - SAVE_DATA_PATH=/data/saves
+      - SERVER_PORT=7777
+      - SERVER_PASSCODE=1234
+    volumes:
+      - ./save_data:/data/saves
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "20m"
+        max-file: "5"
