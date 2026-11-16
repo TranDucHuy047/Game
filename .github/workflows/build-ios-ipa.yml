@@ -6,9 +6,9 @@ on:
     branches: [main, master]
 
 jobs:
-  build-ios-ipa:
-    name: Build Unity iOS & Package .ipa
-    runs-on: macos-14
+  export-xcode-project:
+    name: Export iOS Xcode Project (Unity Ubuntu)
+    runs-on: ubuntu-latest
 
     steps:
       - name: Checkout repository
@@ -18,7 +18,7 @@ jobs:
         shell: bash
         run: |
           if [ -z "${{ secrets.UNITY_LICENSE }}" ] && [ -z "${{ secrets.UNITY_EMAIL }}" ]; then
-            echo "::error::Missing Unity license secrets! Add UNITY_LICENSE (or UNITY_EMAIL + UNITY_PASSWORD + UNITY_SERIAL) in GitHub Repository Settings -> Secrets and variables -> Actions."
+            echo "::error::Missing Unity license secrets! Add UNITY_LICENSE (and UNITY_EMAIL / UNITY_PASSWORD) in GitHub Repository Settings -> Secrets and variables -> Actions."
             exit 1
           fi
 
@@ -43,13 +43,44 @@ jobs:
           buildMethod: CoralArchipelago.EditorTools.CoralProjectAutoBuilder.BuildiOSXcodeFromCLI
           buildsPath: build
 
+      - name: Package Xcode Project Tarball (Preserves Symlinks & Permissions)
+        shell: bash
+        run: |
+          tar -czf ios-xcode.tar.gz -C build iOS
+          ls -lh ios-xcode.tar.gz
+
+      - name: Upload Xcode Project Tarball
+        uses: actions/upload-artifact@v4
+        with:
+          name: iOS-Xcode-Project
+          path: ios-xcode.tar.gz
+          retention-days: 3
+
+  compile-ios-ipa:
+    name: Compile Xcode & Package .ipa (macOS)
+    needs: export-xcode-project
+    runs-on: macos-latest
+
+    steps:
+      - name: Download Xcode Project Tarball
+        uses: actions/download-artifact@v4
+        with:
+          name: iOS-Xcode-Project
+
+      - name: Extract Xcode Project & Restore Script Permissions
+        shell: bash
+        run: |
+          mkdir -p build
+          tar -xzf ios-xcode.tar.gz -C build
+          find build/iOS -type f \( -name "*.sh" -o -name "MapFileParser*" \) -exec chmod +x {} +
+
       - name: Compile Xcode Project & Package Unsigned .ipa (for Sideloadly / Xcode)
         shell: bash
         run: |
           set -euo pipefail
-          XCODEPROJ=$(find build -maxdepth 4 -name "Unity-iPhone.xcodeproj" | head -n 1)
+          XCODEPROJ=$(find build/iOS -maxdepth 4 -name "Unity-iPhone.xcodeproj" | head -n 1)
           if [ -z "$XCODEPROJ" ]; then
-            echo "::error::Unity-iPhone.xcodeproj not found under build/"
+            echo "::error::Unity-iPhone.xcodeproj not found under build/iOS"
             exit 1
           fi
 
