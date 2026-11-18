@@ -10,26 +10,7 @@ namespace CoralArchipelago.Core
     /// </summary>
     public static class CoralContinentSystemsBootstrapper
     {
-        private static bool _hooked;
-
-        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
-        private static void InitializeOnSceneLoad()
-        {
-            if (!_hooked)
-            {
-                SceneManager.sceneLoaded += OnSceneLoaded;
-                _hooked = true;
-            }
-
-            EnsureContinentSystemsPresent(SceneManager.GetActiveScene());
-        }
-
-        private static void OnSceneLoaded(Scene scene, LoadSceneMode mode)
-        {
-            EnsureContinentSystemsPresent(scene);
-        }
-
-        private static void EnsureContinentSystemsPresent(Scene scene)
+        public static void EnsureContinentSystemsPresent(Scene scene)
         {
             if (!scene.IsValid() || !scene.isLoaded)
                 return;

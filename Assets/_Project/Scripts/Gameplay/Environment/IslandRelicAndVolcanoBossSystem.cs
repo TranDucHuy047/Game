@@ -2,26 +2,125 @@ using System;
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.Rendering;
+using UnityEngine.SceneManagement;
 using CoralArchipelago.ClientIOS;
+using CoralArchipelago.Core;
 using CoralArchipelago.Gameplay.AI;
 using CoralArchipelago.Gameplay.Coop;
 using CoralArchipelago.Gameplay.Player;
 using CoralArchipelago.Networking;
 
 /// <summary>
-/// IslandRelicAndVolcanoBossSystem:
-/// Shared 10-player co-op progression across the 2000m x 2000m 5-Biome Coral Archipelago:
-/// - Places 5 HDR Ancient Relic Shrines across the 5 Biomes (progress shared to Camp Log & persisted).
-/// - Unlocks summoning "Ignis Leviathan - Hộ Vệ Đỉnh Núi Lửa" at the Northern Volcanic Temple (0, y, 480)
-///   once 5/5 relics are collected.
-/// - Dynamically scales Boss MaxHP and Damage for 1-10 online players synced with PvEDirector & Debug UI:
-///     MaxHP = 1500 * (1 + 0.45 * (onlinePlayers - 1))
-///     Damage = 18 * (1 + 0.18 * (onlinePlayers - 1))
-/// - Features 3 combat phases with expanding ground AoE Telegraph Rings and HUD Attack button integration.
+/// IslandRelicAndVolcanoBossSystem (Auto-Bootstrap & Unity Editor Quick Test + 10-Player Co-op Raid Boss):
+/// - Automatically initializes at runtime via [RuntimeInitializeOnLoadMethod(AfterSceneLoad)] even on an empty scene.
+/// - Attaches IslandGraphicsUpgrader (2000m x 2000m 5 Biomes), IslandFastTravelAndRaftSystem, and
+///   IslandRelicAndVolcanoBossSystem, spawning a WASD Explorer player if the scene lacks one.
+/// - Places 5 HDR Ancient Relic Shrines across the 5 Biomes, tracks 0/5 -> 5/5 progress (logged to Camp Log),
+///   scales Boss Ignis Leviathan MaxHP & Damage dynamically for 1-10 online players,
+///   runs 3 combat phases with expanding red ground AoE Telegraph Rings, and includes an on-screen
+///   "UNITY EDITOR QUICK TEST" toolbar.
 /// </summary>
 [DisallowMultipleComponent]
 public class IslandRelicAndVolcanoBossSystem : MonoBehaviour
 {
+    public static IslandRelicAndVolcanoBossSystem Instance { get; private set; }
+
+    private static bool _sceneHookRegistered;
+
+    // =========================================================================
+    // 0. RUNTIME AUTO-BOOTSTRAP ON PLAY (▶) IN UNITY EDITOR OR PLAYER
+    // =========================================================================
+    [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
+    private static void AutoBootstrapInUnityEditor()
+    {
+        if (!_sceneHookRegistered)
+        {
+            SceneManager.sceneLoaded += OnSceneLoadedAutoBootstrap;
+            _sceneHookRegistered = true;
+        }
+
+        EnsureContinentSystemsActive(SceneManager.GetActiveScene());
+    }
+
+    private static void OnSceneLoadedAutoBootstrap(Scene scene, LoadSceneMode mode)
+    {
+        EnsureContinentSystemsActive(scene);
+    }
+
+    private static void EnsureContinentSystemsActive(Scene scene)
+    {
+        if (!scene.IsValid() || !scene.isLoaded)
+            return;
+
+        // Avoid spawning world chunks or explorer capsules inside the Login/Lobby Bootstrap scene
+        if (scene.name.Contains("Bootstrap") && WorldTimeManager.Instance == null && GameObject.Find("WorldManagers") == null)
+            return;
+
+        IslandGraphicsUpgrader upgrader = FindFirstObjectByType<IslandGraphicsUpgrader>();
+        GameObject hubObj;
+
+        if (upgrader == null)
+        {
+            hubObj = GameObject.Find("IslandWorldUpgrader_2000m");
+            if (hubObj == null)
+                hubObj = new GameObject("CoralArchipelago_AutoSystemHub");
+
+            upgrader = hubObj.AddComponent<IslandGraphicsUpgrader>();
+        }
+        else
+        {
+            hubObj = upgrader.gameObject;
+        }
+
+        IslandFastTravelAndRaftSystem fastTravel = FindFirstObjectByType<IslandFastTravelAndRaftSystem>();
+        if (fastTravel == null)
+        {
+            fastTravel = hubObj.AddComponent<IslandFastTravelAndRaftSystem>();
+        }
+
+        IslandRelicAndVolcanoBossSystem relicBoss = FindFirstObjectByType<IslandRelicAndVolcanoBossSystem>();
+        if (relicBoss == null)
+        {
+            relicBoss = hubObj.AddComponent<IslandRelicAndVolcanoBossSystem>();
+        }
+
+        if (!NetworkBootstrap.IsRunningAsDedicatedServer())
+        {
+            EnsurePlayableExplorerExists(upgrader);
+        }
+    }
+
+    private static void EnsurePlayableExplorerExists(IslandGraphicsUpgrader upgrader)
+    {
+        CharacterController existingCC = FindFirstObjectByType<CharacterController>();
+        GameObject taggedPlayer = null;
+        try { taggedPlayer = GameObject.FindWithTag("Player"); } catch { /* ignore if tag missing */ }
+
+        if (existingCC != null || taggedPlayer != null)
+            return;
+
+        // If Unity Netcode Host/Client already exists and is actively starting in world, don't duplicate
+        if (Unity.Netcode.NetworkManager.Singleton != null && Unity.Netcode.NetworkManager.Singleton.IsListening)
+            return;
+
+        GameObject playerGo = GameObject.CreatePrimitive(PrimitiveType.Capsule);
+        playerGo.name = "Player_Explorer_Auto";
+        try { playerGo.tag = "Player"; } catch { /* ignore */ }
+
+        DestroyImmediate(playerGo.GetComponent<CapsuleCollider>());
+        CharacterController cc = playerGo.AddComponent<CharacterController>();
+        cc.height = 1.8f;
+        cc.radius = 0.4f;
+        cc.center = Vector3.zero;
+
+        float startY = upgrader != null
+            ? upgrader.EvaluateHeightOnly(0f, -8f)
+            : IslandGraphicsUpgrader.EvaluateWorldHeightStatic(0f, -8f);
+        playerGo.transform.position = new Vector3(0f, startY + 1.2f, -8f);
+
+        playerGo.AddComponent<EditorQuickTestPlayerMotor>();
+    }
+
     [Serializable]
     public class AncientRelicData
     {
@@ -48,34 +147,31 @@ public class IslandRelicAndVolcanoBossSystem : MonoBehaviour
         Defeated = 5
     }
 
-    public static IslandRelicAndVolcanoBossSystem Instance { get; private set; }
-
-    [Header("=== 1. 5 BIOME RELIC SHRINES ===")]
+    [Header("=== 1. CẤU HÌNH 5 MẢNH CỔ NGỮ (5 BIOME RELICS) ===")]
     public float relicInteractRadius = 4.5f;
     public List<AncientRelicData> relics = new List<AncientRelicData>();
 
-    [Header("=== 2. VOLCANIC SUMMIT BOSS & 1-10 PLAYER SCALING ===")]
+    [Header("=== 2. CẤU HÌNH BOSS ĐỈNH NÚI LỬA & CO GIÃN 1-10 NGƯỜI ===")]
     public Vector2 summitArenaXZ = new Vector2(0f, 480f);
     public float bossBaseMaxHP = 1500f;
     public float bossBaseDamage = 18f;
     [Range(1, 10)] public int currentOnlinePlayers = 1;
-    public float playerAttackDamage = 45f;
-    public float playerAttackRange = 8.5f;
-    public float playerAttackCooldown = 0.55f;
+    public float playerAttackDamage = 75f;
+    public float playerAttackRange = 9.5f;
+    public float playerAttackCooldown = 0.45f;
     public GameObject customBossPrefab;
 
     private bool _isHeadlessServer;
+    private bool _hasMobileHud;
     private BossState _bossState = BossState.Dormant;
     private float _bossCurrentHP;
     private float _bossScaledMaxHP;
     private float _bossScaledDamage;
     private Transform _bossRoot;
-    private Transform _bossCoreVisual;
     private readonly List<Transform> _bossOrbitShards = new List<Transform>();
     private float _bossActionTimer;
     private float _lastPlayerAttackTime;
 
-    // Telegraph AoE Ring state
     private GameObject _telegraphRingObj;
     private Material _telegraphMaterial;
     private bool _isChargingAoE;
@@ -85,24 +181,18 @@ public class IslandRelicAndVolcanoBossSystem : MonoBehaviour
     private Vector3 _aoeTargetCenter;
 
     private IslandGraphicsUpgrader _worldUpgrader;
+    private IslandFastTravelAndRaftSystem _fastTravelSystem;
     private Transform _playerTransform;
     private NetworkPlayerController _networkPlayer;
     private AncientRelicData _nearbyRelic;
     private bool _isNearSummitAltar;
     private string _bannerMessage = "";
     private float _bannerTimer;
+    private bool _showEditorTestBar = true;
 
-    // Shared Materials & GUI styles
     private Material _shrineStoneMat;
     private Material _bossObsidianMat;
     private Material _bossMagmaCoreMat;
-    private Texture2D _uiDarkBgTex;
-    private Texture2D _uiAccentTex;
-    private Texture2D _uiBossBarBgTex;
-    private Texture2D _uiBossBarFillTex;
-    private GUIStyle _boxStyle;
-    private GUIStyle _btnStyle;
-    private GUIStyle _labelStyle;
 
     private void Awake()
     {
@@ -122,12 +212,16 @@ public class IslandRelicAndVolcanoBossSystem : MonoBehaviour
         _worldUpgrader = IslandGraphicsUpgrader.Instance != null
             ? IslandGraphicsUpgrader.Instance
             : FindFirstObjectByType<IslandGraphicsUpgrader>();
+        _fastTravelSystem = IslandFastTravelAndRaftSystem.Instance != null
+            ? IslandFastTravelAndRaftSystem.Instance
+            : FindFirstObjectByType<IslandFastTravelAndRaftSystem>();
 
         RecalculateBossScaling(currentOnlinePlayers);
 
         if (_isHeadlessServer)
             return;
 
+        _hasMobileHud = GameObject.Find("MobileHUD") != null;
         BuildMaterials();
         SpawnAllRelicShrines();
         CreateTelegraphRingIndicator();
@@ -137,11 +231,6 @@ public class IslandRelicAndVolcanoBossSystem : MonoBehaviour
     {
         if (Instance == this)
             Instance = null;
-
-        if (_uiDarkBgTex != null) Destroy(_uiDarkBgTex);
-        if (_uiAccentTex != null) Destroy(_uiAccentTex);
-        if (_uiBossBarBgTex != null) Destroy(_uiBossBarBgTex);
-        if (_uiBossBarFillTex != null) Destroy(_uiBossBarFillTex);
     }
 
     private void Update()
@@ -178,7 +267,7 @@ public class IslandRelicAndVolcanoBossSystem : MonoBehaviour
     }
 
     // =========================================================================
-    // 1. 5 ANCIENT RELIC SHRINES ACROSS 5 BIOMES
+    // 1. KHỞI TẠO 5 ĐÀN TẾ CỔ NGỮ TẠI 5 QUẦN XÃ TRÊN ĐẢO 2000M x 2000M
     // =========================================================================
     private void InitializeDefaultRelicsIfNeeded()
     {
@@ -353,7 +442,7 @@ public class IslandRelicAndVolcanoBossSystem : MonoBehaviour
 
         float summitY = SampleGroundHeight(summitArenaXZ.x, summitArenaXZ.y);
         Vector3 summitPos = new Vector3(summitArenaXZ.x, summitY, summitArenaXZ.y);
-        _isNearSummitAltar = Vector3.Distance(playerPos, summitPos) <= 16f;
+        _isNearSummitAltar = Vector3.Distance(playerPos, summitPos) <= 18f;
     }
 
     public int GetCollectedRelicCount()
@@ -381,13 +470,32 @@ public class IslandRelicAndVolcanoBossSystem : MonoBehaviour
             relic.runeLight.intensity = 0.4f;
 
         int total = GetCollectedRelicCount();
-        string msg = $"Collected {relic.relicName} ({total}/5)";
-        RecordCampLogSafe(msg);
+        RecordCampLogSafe($"Collected {relic.relicName} ({total}/5)");
         ShowBannerMessage($"Đã thu thập {relic.relicName}! Tiến độ Cổ Ngữ Toàn Server: {total}/5");
     }
 
+    public void UnlockAllRelicsAndPortalsForTest()
+    {
+        foreach (AncientRelicData r in relics)
+        {
+            r.isCollected = true;
+            if (r.floatingRuneMesh != null) r.floatingRuneMesh.gameObject.SetActive(false);
+            if (r.runeLight != null) r.runeLight.intensity = 0.4f;
+        }
+
+        if (_fastTravelSystem != null && _fastTravelSystem.waypoints != null)
+        {
+            foreach (var wp in _fastTravelSystem.waypoints)
+            {
+                wp.isUnlocked = true;
+            }
+        }
+
+        ShowBannerMessage("EDITOR TEST: Đã mở khóa đủ 5/5 Cổ Ngữ và toàn bộ 5 Cổng Dịch Chuyển!");
+    }
+
     // =========================================================================
-    // 2. 1-10 PLAYER SCALING & VOLCANIC BOSS SUMMONING
+    // 2. CO GIÃN ĐỘ KHÓ (1-10 NGƯỜI) & TRIỆU HỒI BOSS ĐỈNH NÚI LỬA
     // =========================================================================
     public void RecalculateBossScaling(int onlinePlayers)
     {
@@ -407,12 +515,6 @@ public class IslandRelicAndVolcanoBossSystem : MonoBehaviour
 
     public void SummonVolcanoBoss()
     {
-        if (_bossState != BossState.Dormant && _bossState != BossState.Defeated)
-            return;
-
-        if (GetCollectedRelicCount() < 5)
-            return;
-
         int playersOnline = PvEDirector.Instance != null && PvEDirector.Instance.IsSpawned
             ? Mathf.Max(1, PvEDirector.Instance.ActivePlayerCount.Value)
             : currentOnlinePlayers;
@@ -463,7 +565,6 @@ public class IslandRelicAndVolcanoBossSystem : MonoBehaviour
         core.transform.localPosition = new Vector3(0f, 2.4f, 0.85f);
         core.transform.localScale = new Vector3(1.1f, 1.1f, 0.7f);
         core.GetComponent<MeshRenderer>().sharedMaterial = _bossMagmaCoreMat;
-        _bossCoreVisual = core.transform;
 
         GameObject head = GameObject.CreatePrimitive(PrimitiveType.Cube);
         Destroy(head.GetComponent<Collider>());
@@ -494,7 +595,7 @@ public class IslandRelicAndVolcanoBossSystem : MonoBehaviour
     }
 
     // =========================================================================
-    // 3. 3-PHASE BOSS COMBAT & TELEGRAPH AOE RING
+    // 3. AI CHIẾN ĐẤU 3 GIAI ĐOẠN (3 PHASES) & VÒNG CẢNH BÁO AOE
     // =========================================================================
     private void CreateTelegraphRingIndicator()
     {
@@ -508,7 +609,7 @@ public class IslandRelicAndVolcanoBossSystem : MonoBehaviour
         _telegraphMaterial = new Material(shader);
         _telegraphMaterial.EnableKeyword("_EMISSION");
 
-        Color warnCol = new Color(1.0f, 0.18f, 0.06f, 0.55f);
+        Color warnCol = new Color(1.0f, 0.22f, 0.08f, 0.55f);
         if (isURP)
         {
             _telegraphMaterial.SetColor("_BaseColor", warnCol);
@@ -549,18 +650,10 @@ public class IslandRelicAndVolcanoBossSystem : MonoBehaviour
         for (int i = 0; i < _bossOrbitShards.Count; i++)
         {
             Transform shard = _bossOrbitShards[i];
-            if (shard == null)
-                continue;
-
+            if (shard == null) continue;
             float ang = time * orbitSpeed + i * (Mathf.PI * 0.5f);
             shard.localPosition = new Vector3(Mathf.Cos(ang) * 2.6f, 2.3f + Mathf.Sin(time * 3f + i) * 0.25f, Mathf.Sin(ang) * 2.6f);
             shard.localRotation = Quaternion.Euler(15f, -ang * Mathf.Rad2Deg, 0f);
-        }
-
-        if (_bossCoreVisual != null)
-        {
-            float pulseScale = 1.0f + 0.14f * Mathf.Sin(time * (_bossState == BossState.CombatPhase3 ? 8f : 4f));
-            _bossCoreVisual.localScale = new Vector3(1.1f * pulseScale, 1.1f * pulseScale, 0.7f * pulseScale);
         }
 
         Vector3 playerPos = _playerTransform.position;
@@ -622,9 +715,6 @@ public class IslandRelicAndVolcanoBossSystem : MonoBehaviour
         }
     }
 
-    /// <summary>
-    /// Invoked automatically when player taps the HUD Attack/Harvest button within 8.5m of Boss.
-    /// </summary>
     public void TryPlayerAttackBossFromHUD()
     {
         if (_bossState == BossState.Dormant || _bossState == BossState.Defeated || _bossRoot == null || _playerTransform == null)
@@ -646,7 +736,7 @@ public class IslandRelicAndVolcanoBossSystem : MonoBehaviour
         float dist = Vector3.Distance(_playerTransform.position, _bossRoot.position);
         if (dist > playerAttackRange)
         {
-            ShowBannerMessage("Bạn đứng quá xa Boss! Hãy tiến lại gần hơn (< 8.5m).");
+            ShowBannerMessage("Bạn đứng quá xa Boss! Hãy tiến lại gần hơn (< 9.5m).");
             return;
         }
 
@@ -673,65 +763,14 @@ public class IslandRelicAndVolcanoBossSystem : MonoBehaviour
     }
 
     // =========================================================================
-    // 4. RESPONSIVE NON-OVERLAPPING HUD OVERLAY (1920x1080 VIRTUAL SCALE)
+    // 4. GIAO DIỆN HUD & BẢNG "UNITY EDITOR QUICK TEST" TRỰC TIẾP TRÊN MÀN HÌNH
     // =========================================================================
-    private void EnsureGuiStyles()
-    {
-        if (_boxStyle != null && _btnStyle != null && _labelStyle != null)
-            return;
-
-        _uiDarkBgTex = new Texture2D(1, 1);
-        _uiDarkBgTex.SetPixel(0, 0, new Color(0.05f, 0.12f, 0.22f, 0.84f));
-        _uiDarkBgTex.Apply();
-
-        _uiAccentTex = new Texture2D(1, 1);
-        _uiAccentTex.SetPixel(0, 0, new Color(0.74f, 0.24f, 0.16f, 0.94f));
-        _uiAccentTex.Apply();
-
-        _uiBossBarBgTex = new Texture2D(1, 1);
-        _uiBossBarBgTex.SetPixel(0, 0, new Color(0.18f, 0.04f, 0.04f, 0.90f));
-        _uiBossBarBgTex.Apply();
-
-        _uiBossBarFillTex = new Texture2D(1, 1);
-        _uiBossBarFillTex.SetPixel(0, 0, new Color(0.96f, 0.30f, 0.12f, 0.95f));
-        _uiBossBarFillTex.Apply();
-
-        _boxStyle = new GUIStyle(GUI.skin.box)
-        {
-            fontSize = 15,
-            fontStyle = FontStyle.Bold,
-            alignment = TextAnchor.MiddleCenter
-        };
-        _boxStyle.normal.background = _uiDarkBgTex;
-        _boxStyle.normal.textColor = new Color(0.88f, 0.97f, 1.0f);
-
-        _btnStyle = new GUIStyle(GUI.skin.button)
-        {
-            fontSize = 17,
-            fontStyle = FontStyle.Bold,
-            alignment = TextAnchor.MiddleCenter
-        };
-        _btnStyle.normal.background = _uiAccentTex;
-        _btnStyle.normal.textColor = Color.white;
-
-        _labelStyle = new GUIStyle(GUI.skin.label)
-        {
-            fontSize = 15,
-            fontStyle = FontStyle.Bold,
-            alignment = TextAnchor.MiddleCenter
-        };
-        _labelStyle.normal.background = null;
-        _labelStyle.normal.textColor = Color.white;
-    }
-
     private void OnGUI()
     {
         if (_isHeadlessServer || _playerTransform == null)
             return;
 
-        EnsureGuiStyles();
-
-        float guiScale = Mathf.Max(0.4f, Mathf.Min(Screen.width / 1920f, Screen.height / 1080f));
+        float guiScale = Mathf.Max(0.45f, Mathf.Min(Screen.width / 1920f, Screen.height / 1080f));
         float virtualW = Screen.width / guiScale;
         float virtualH = Screen.height / guiScale;
 
@@ -740,53 +779,110 @@ public class IslandRelicAndVolcanoBossSystem : MonoBehaviour
 
         try
         {
-            // 1. Relic Progress Tracker centered right under CompassBarCard (clear of Top-Left Tutorial & StatusPill)
-            int collectedCount = GetCollectedRelicCount();
-            Rect trackerRect = new Rect(virtualW * 0.5f - 210f, 122f, 420f, 42f);
-            GUI.Box(trackerRect, $"Cổ Ngữ Đảo Lớn: {collectedCount}/5 Mảnh (Đủ 5/5 lên Núi Lửa mở Boss)", _boxStyle);
-
-            // 2. Boss Health Bar right under Relic Tracker
-            if (_bossState != BossState.Dormant && _bossState != BossState.Defeated)
+            GUIStyle boxStyle = new GUIStyle(GUI.skin.box)
             {
-                float barW = 500f;
-                Rect bossBarBg = new Rect(virtualW * 0.5f - barW * 0.5f, 170f, barW, 38f);
-                float hpRatio = Mathf.Clamp01(_bossCurrentHP / Mathf.Max(1f, _bossScaledMaxHP));
+                fontSize = 15,
+                fontStyle = FontStyle.Bold,
+                alignment = TextAnchor.MiddleCenter
+            };
 
-                GUI.DrawTexture(bossBarBg, _uiBossBarBgTex);
-                Rect fillRect = new Rect(bossBarBg.x + 2f, bossBarBg.y + 2f, (barW - 4f) * hpRatio, bossBarBg.height - 4f);
-                GUI.DrawTexture(fillRect, _uiBossBarFillTex);
-                GUI.Label(
-                    bossBarBg,
-                    $"IGNIS LEVIATHAN [{_bossState}] - HP: {_bossCurrentHP:0}/{_bossScaledMaxHP:0} (DMG: {_bossScaledDamage:0})",
-                    _labelStyle);
+            GUIStyle btnStyle = new GUIStyle(GUI.skin.button)
+            {
+                fontSize = 15,
+                fontStyle = FontStyle.Bold
+            };
 
-                if (_bossRoot != null && Vector3.Distance(_playerTransform.position, _bossRoot.position) <= playerAttackRange)
+            int collectedCount = GetCollectedRelicCount();
+            float trackerX = _hasMobileHud ? virtualW * 0.5f - 200f : 16f;
+            float trackerY = _hasMobileHud ? 122f : 16f;
+            Rect trackerRect = new Rect(trackerX, trackerY, _hasMobileHud ? 400f : 310f, 44f);
+            GUI.Box(trackerRect, $"Cổ Ngữ Đảo Lớn: {collectedCount}/5 Mảnh\n(Đủ 5/5 lên Đỉnh Núi Lửa mở Boss)", boxStyle);
+
+            // Place Quick Test bar on top-left in empty/untitled scene, or top-right below Debug card on MobileHUD
+            float panelX = _hasMobileHud ? virtualW - 316f : 16f;
+            float toggleY = _hasMobileHud ? 200f : 68f;
+            float panelY = toggleY + 34f;
+
+            if (GUI.Button(new Rect(panelX, toggleY, 300f, 30f), _showEditorTestBar ? "Thu gọn Bảng Test Nhanh [-]" : "Mở Bảng Test Nhanh [+]", btnStyle))
+            {
+                _showEditorTestBar = !_showEditorTestBar;
+            }
+
+            if (_showEditorTestBar)
+            {
+                Rect panelRect = new Rect(panelX, panelY, 300f, 240f);
+                GUI.Box(panelRect, "UNITY EDITOR QUICK TEST");
+
+                if (GUI.Button(new Rect(panelX + 10f, panelY + 30f, 280f, 34f), "1. Mở Khóa 5/5 Cổ Ngữ & 5 Cổng", btnStyle))
                 {
-                    Rect atkRect = new Rect(virtualW * 0.5f - 170f, virtualH - 238f, 340f, 44f);
-                    if (GUI.Button(atkRect, $"Tấn Công Boss (-{playerAttackDamage:0} HP)", _btnStyle))
-                    {
-                        PlayerAttackBoss();
-                    }
+                    UnlockAllRelicsAndPortalsForTest();
+                }
+
+                if (GUI.Button(new Rect(panelX + 10f, panelY + 70f, 280f, 34f), "2. Bay Lên Đỉnh Núi Lửa Ngay", btnStyle))
+                {
+                    UnlockAllRelicsAndPortalsForTest();
+                    TeleportDirectToPosition(new Vector3(0f, SampleGroundHeight(0f, 468f) + 1.5f, 468f));
+                    ShowBannerMessage("Đã dịch chuyển lên Đỉnh Núi Lửa Cổ Đại (Độ cao 135m)!");
+                }
+
+                if (GUI.Button(new Rect(panelX + 10f, panelY + 110f, 280f, 34f), "3. Gọi Boss Ignis Leviathan Ngay", btnStyle))
+                {
+                    UnlockAllRelicsAndPortalsForTest();
+                    TeleportDirectToPosition(new Vector3(0f, SampleGroundHeight(0f, 472f) + 1.5f, 472f));
+                    SummonVolcanoBoss();
+                }
+
+                if (GUI.Button(new Rect(panelX + 10f, panelY + 150f, 280f, 34f), "4. Đổi Ngày / Đêm BioGlow", btnStyle))
+                {
+                    ToggleDayNightForTest();
+                }
+
+                if (GUI.Button(new Rect(panelX + 10f, panelY + 190f, 136f, 34f), $"+1 Người ({currentOnlinePlayers}/10)", btnStyle))
+                {
+                    int next = Mathf.Clamp(currentOnlinePlayers + 1, 1, 10);
+                    if (PvEDirector.Instance != null && PvEDirector.Instance.IsServer)
+                        PvEDirector.Instance.RecalculateDifficultyServer(next);
+                    RecalculateBossScaling(next);
+                }
+                if (GUI.Button(new Rect(panelX + 154f, panelY + 190f, 136f, 34f), "-1 Người", btnStyle))
+                {
+                    int next = Mathf.Clamp(currentOnlinePlayers - 1, 1, 10);
+                    if (PvEDirector.Instance != null && PvEDirector.Instance.IsServer)
+                        PvEDirector.Instance.RecalculateDifficultyServer(next);
+                    RecalculateBossScaling(next);
                 }
             }
 
-            // 3. Collect Relic Shrine button (above Portal/Raft buttons, zero overlap)
+            if (_bossState != BossState.Dormant && _bossState != BossState.Defeated)
+            {
+                float barW = 480f;
+                float bossY = _hasMobileHud ? 172f : 48f;
+                Rect bossBarBg = new Rect(virtualW * 0.5f - barW * 0.5f, bossY, barW, 38f);
+                float hpRatio = Mathf.Clamp01(_bossCurrentHP / Mathf.Max(1f, _bossScaledMaxHP));
+                GUI.Box(bossBarBg, $"IGNIS LEVIATHAN [{_bossState}] - HP: {_bossCurrentHP:0}/{_bossScaledMaxHP:0} ({hpRatio * 100f:0}%)", boxStyle);
+
+                Rect atkRect = new Rect(virtualW * 0.5f - 165f, virtualH - 238f, 330f, 44f);
+                if (GUI.Button(atkRect, $"Đánh Boss (-{playerAttackDamage:0} HP) [Phím Space]", btnStyle) || Input.GetKeyDown(KeyCode.Space))
+                {
+                    PlayerAttackBoss();
+                }
+            }
+
             if (_nearbyRelic != null && !_nearbyRelic.isCollected)
             {
-                Rect collectRect = new Rect(virtualW * 0.5f - 220f, virtualH - 238f, 440f, 44f);
-                if (GUI.Button(collectRect, $"Thu thập {_nearbyRelic.relicName}", _btnStyle))
+                Rect collectRect = new Rect(virtualW * 0.5f - 210f, virtualH - 238f, 420f, 44f);
+                if (GUI.Button(collectRect, $"Thu thập {_nearbyRelic.relicName}", btnStyle))
                 {
                     CollectRelic(_nearbyRelic);
                 }
             }
 
-            // 4. Summon Volcano Boss button at Northern Summit Temple
             if (_isNearSummitAltar && (_bossState == BossState.Dormant || _bossState == BossState.Defeated))
             {
-                Rect summonRect = new Rect(virtualW * 0.5f - 250f, virtualH - 238f, 500f, 46f);
+                Rect summonRect = new Rect(virtualW * 0.5f - 230f, virtualH - 238f, 460f, 44f);
                 if (collectedCount >= 5)
                 {
-                    if (GUI.Button(summonRect, "Đặt 5 Cổ Ngữ - Triệu Hồi Boss Ignis Leviathan!", _btnStyle))
+                    if (GUI.Button(summonRect, "Đặt 5 Cổ Ngữ - Triệu Hồi Boss Ignis Leviathan!", btnStyle))
                     {
                         SummonVolcanoBoss();
                     }
@@ -794,23 +890,59 @@ public class IslandRelicAndVolcanoBossSystem : MonoBehaviour
                 else
                 {
                     GUI.enabled = false;
-                    GUI.Button(summonRect, $"Đền Thờ Núi Lửa: Cần đủ 5/5 Cổ Ngữ (Hiện có {collectedCount}/5)", _btnStyle);
+                    GUI.Button(summonRect, $"Đền Thờ Núi Lửa: Cần đủ 5/5 Cổ Ngữ (Hiện có {collectedCount}/5)", btnStyle);
                     GUI.enabled = true;
                 }
             }
 
-            // 5. Event Banner below Boss Bar / Tracker
             if (_bannerTimer > 0f && !string.IsNullOrEmpty(_bannerMessage))
             {
-                float bannerY = (_bossState != BossState.Dormant && _bossState != BossState.Defeated) ? 214f : 170f;
-                Rect bannerRect = new Rect(virtualW * 0.5f - 300f, bannerY, 600f, 40f);
-                GUI.Box(bannerRect, _bannerMessage, _boxStyle);
+                float bannerY = _hasMobileHud ? 216f : 94f;
+                Rect bannerRect = new Rect(virtualW * 0.5f - 280f, bannerY, 560f, 38f);
+                GUI.Box(bannerRect, _bannerMessage, boxStyle);
             }
         }
         finally
         {
             GUI.matrix = prevMatrix;
         }
+    }
+
+    private void ToggleDayNightForTest()
+    {
+        if (WorldTimeManager.Instance != null && WorldTimeManager.Instance.IsServer)
+        {
+            WorldTimeManager.Instance.AdvanceHoursDebugServer(12.0f);
+            return;
+        }
+
+        if (_worldUpgrader != null)
+        {
+            bool isNight = _worldUpgrader.currentHour > 19f || _worldUpgrader.currentHour < 5f;
+            _worldUpgrader.currentHour = isNight ? 9.0f : 22.5f;
+            _worldUpgrader.bioGlowIntensity = isNight ? 0f : 1f;
+        }
+    }
+
+    private void TeleportDirectToPosition(Vector3 targetPos)
+    {
+        if (_playerTransform == null)
+            return;
+
+        if (_networkPlayer != null && _networkPlayer.IsSpawned)
+        {
+            _networkPlayer.RequestTeleportToPosition(targetPos);
+        }
+        else
+        {
+            CharacterController cc = _playerTransform.GetComponent<CharacterController>();
+            if (cc != null) cc.enabled = false;
+            _playerTransform.position = targetPos;
+            if (cc != null) cc.enabled = true;
+        }
+
+        // Immediately activate destination chunk MeshCollider so player doesn't fall through summit
+        _worldUpgrader?.RefreshStreamingNow();
     }
 
     private void ShowBannerMessage(string msg)
@@ -839,18 +971,26 @@ public class IslandRelicAndVolcanoBossSystem : MonoBehaviour
             return;
         }
 
-        GameObject tagged = GameObject.FindWithTag("Player");
-        if (tagged != null)
+        try
         {
-            _playerTransform = tagged.transform;
-            _networkPlayer = tagged.GetComponent<NetworkPlayerController>();
+            GameObject tagged = GameObject.FindWithTag("Player");
+            if (tagged != null)
+            {
+                _playerTransform = tagged.transform;
+                _networkPlayer = tagged.GetComponent<NetworkPlayerController>();
+                return;
+            }
         }
+        catch { /* ignore */ }
     }
 
     private float SampleGroundHeight(float worldX, float worldZ)
     {
         if (_worldUpgrader != null)
             return _worldUpgrader.EvaluateHeightOnly(worldX, worldZ);
+
+        if (Physics.Raycast(new Vector3(worldX, 300f, worldZ), Vector3.down, out RaycastHit hit, 500f))
+            return hit.point.y;
 
         return IslandGraphicsUpgrader.EvaluateWorldHeightStatic(worldX, worldZ);
     }
@@ -864,5 +1004,69 @@ public class IslandRelicAndVolcanoBossSystem : MonoBehaviour
             SharedCampLogManager.Instance.RecordActivityServer(message);
         else
             SharedCampLogManager.Instance.PostPlayerNoteServerRpc(message);
+    }
+}
+
+/// <summary>
+/// Third-person WASD + camera controller automatically attached when pressing Play in Unity Editor.
+/// </summary>
+public class EditorQuickTestPlayerMotor : MonoBehaviour
+{
+    public float moveSpeed = 9.5f;
+    public float sprintMultiplier = 1.75f;
+    public float gravity = -20f;
+
+    private CharacterController _cc;
+    private float _verticalVelocity;
+    private float _cameraYaw;
+
+    private void Start()
+    {
+        _cc = GetComponent<CharacterController>();
+    }
+
+    private void Update()
+    {
+        if (_cc == null || !_cc.enabled)
+            return;
+
+        float h = Input.GetAxis("Horizontal");
+        float v = Input.GetAxis("Vertical");
+
+        if (Input.GetMouseButton(1))
+        {
+            _cameraYaw += Input.GetAxis("Mouse X") * 4.2f;
+        }
+        else if (Mathf.Abs(h) > 0.05f && Mathf.Abs(v) < 0.05f)
+        {
+            _cameraYaw += h * 95f * Time.deltaTime;
+        }
+
+        Quaternion yawRot = Quaternion.Euler(0f, _cameraYaw, 0f);
+        Vector3 moveDir = yawRot * new Vector3(h, 0f, v);
+        if (moveDir.sqrMagnitude > 1f) moveDir.Normalize();
+
+        float speed = moveSpeed * (Input.GetKey(KeyCode.LeftShift) ? sprintMultiplier : 1f);
+
+        if (_cc.isGrounded && _verticalVelocity < 0f)
+        {
+            _verticalVelocity = -2f;
+        }
+        _verticalVelocity += gravity * Time.deltaTime;
+
+        Vector3 velocity = moveDir * speed + Vector3.up * _verticalVelocity;
+        _cc.Move(velocity * Time.deltaTime);
+
+        if (moveDir.sqrMagnitude > 0.01f)
+        {
+            transform.rotation = Quaternion.Slerp(transform.rotation, Quaternion.LookRotation(moveDir), 10f * Time.deltaTime);
+        }
+
+        if (Camera.main != null)
+        {
+            Vector3 desiredCamPos = transform.position + yawRot * new Vector3(0f, 4.2f, -7.8f);
+            Camera.main.transform.position = Vector3.Lerp(Camera.main.transform.position, desiredCamPos, 12f * Time.deltaTime);
+            Camera.main.transform.LookAt(transform.position + Vector3.up * 1.2f);
+        }
     }
 }
