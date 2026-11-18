@@ -179,7 +179,7 @@ namespace CoralArchipelago.EditorTools
             Material crystalMat = CreateOrLoadBiolumMaterial("MAT_GlowCrystal.mat", new Color(0.20f, 0.85f, 0.98f), new Color(0.22f, 2.35f, 3.0f), 0.14f);
             Material coralMat = CreateOrLoadBiolumMaterial("MAT_CoralBiolum.mat", new Color(0.92f, 0.36f, 0.48f), new Color(0.25f, 1.85f, 2.30f), 0.08f);
             Material palmBarkMat = CreateOrLoadLitMaterial("MAT_PalmBark.mat", new Color(0.46f, 0.28f, 0.16f), 0.15f);
-            Material palmLeavesMat = CreateOrLoadLitMaterial("MAT_PalmLeaves.mat", new Color(0.18f, 0.62f, 0.26f), 0.28f);
+            Material palmLeavesMat = CreateOrLoadFoliageWindMaterial("MAT_PalmLeaves.mat", new Color(0.16f, 0.54f, 0.20f), new Color(0.38f, 0.72f, 0.22f));
 
             Material advMat = CreateOrLoadTexturedLitMaterial("MAT_KayKit_Adventurer.mat", $"{KayKitAdvDir}/barbarian_texture.png");
             Material skelMat = CreateOrLoadTexturedLitMaterial("MAT_KayKit_Skeleton.mat", $"{KayKitSkelDir}/skeleton_texture.png");
@@ -278,11 +278,12 @@ namespace CoralArchipelago.EditorTools
                 AssetDatabase.CreateAsset(urpAsset, urpPath);
             }
 
-            // Retina sharp defaults (no blurry 0.68/0.75 scaling)
+            // Retina sharp defaults + 4 Shadow Cascades
             urpAsset.renderScale = 1.0f;
             urpAsset.supportsCameraDepthTexture = true;
             urpAsset.supportsHDR = true;
-            urpAsset.shadowDistance = 120f;
+            urpAsset.shadowDistance = 140f;
+            urpAsset.shadowCascadeCount = 4;
             urpAsset.msaaSampleCount = 4;
             EditorUtility.SetDirty(urpAsset);
 
@@ -328,11 +329,12 @@ namespace CoralArchipelago.EditorTools
         private static Material CreateOrLoadTerrainMaterial(string fileName)
         {
             string path = $"{MaterialsDir}/{fileName}";
-            Shader shader = Shader.Find("CoralArchipelago/URP/CoralIslandTerrainURP");
+            Shader shader = Shader.Find("CoralArchipelago/URP/IslandTerrainSplatURP");
+            if (shader == null) shader = Shader.Find("CoralArchipelago/URP/CoralIslandTerrainURP");
             if (shader == null) shader = Shader.Find("Universal Render Pipeline/Lit");
 
             Material mat = GetOrCreateMaterialAsset(path, shader);
-            if (mat.HasProperty("_UseVertexBiomeColor")) mat.SetFloat("_UseVertexBiomeColor", 1.0f);
+            if (mat.HasProperty("_UseVertexBiomeTint")) mat.SetFloat("_UseVertexBiomeTint", 0.32f);
             mat.enableInstancing = true;
             EditorUtility.SetDirty(mat);
             return mat;
@@ -341,10 +343,25 @@ namespace CoralArchipelago.EditorTools
         private static Material CreateOrLoadOceanMaterial(string fileName)
         {
             string path = $"{MaterialsDir}/{fileName}";
-            Shader shader = Shader.Find("CoralArchipelago/URP/CoralOceanWaterURP");
+            Shader shader = Shader.Find("CoralArchipelago/URP/TropicalLagoonWaterURP");
+            if (shader == null) shader = Shader.Find("CoralArchipelago/URP/CoralOceanWaterURP");
             if (shader == null) shader = Shader.Find("Universal Render Pipeline/Lit");
 
             Material mat = GetOrCreateMaterialAsset(path, shader);
+            mat.enableInstancing = true;
+            EditorUtility.SetDirty(mat);
+            return mat;
+        }
+
+        private static Material CreateOrLoadFoliageWindMaterial(string fileName, Color baseCol, Color tipCol)
+        {
+            string path = $"{MaterialsDir}/{fileName}";
+            Shader shader = Shader.Find("CoralArchipelago/URP/TropicalFoliageWindURP");
+            if (shader == null) shader = Shader.Find("Universal Render Pipeline/Lit");
+
+            Material mat = GetOrCreateMaterialAsset(path, shader);
+            if (mat.HasProperty("_BaseColor")) mat.SetColor("_BaseColor", baseCol);
+            if (mat.HasProperty("_TipColor")) mat.SetColor("_TipColor", tipCol);
             mat.enableInstancing = true;
             EditorUtility.SetDirty(mat);
             return mat;
@@ -1043,9 +1060,25 @@ namespace CoralArchipelago.EditorTools
                 Vector3.zero,
                 new Vector3(0f, 0f, 0f));
 
+            AdjustKayKitPlayerProportions(model);
+
             GameObject saved = PrefabUtility.SaveAsPrefabAsset(root, path);
             Object.DestroyImmediate(root);
             return saved;
+        }
+
+        private static void AdjustKayKitPlayerProportions(GameObject modelRoot)
+        {
+            if (modelRoot == null)
+                return;
+
+            Transform head = FindChildRecursive(modelRoot.transform, "head", "Head");
+            if (head != null)
+                head.localScale = Vector3.one * 0.78f;
+
+            Transform tool = FindChildRecursive(modelRoot.transform, "EquippedTool");
+            if (tool != null)
+                tool.localScale = Vector3.one * 0.75f;
         }
 
         private static GameObject CreateSpaceFloorPrefab(Material spaceMat)
@@ -1452,6 +1485,8 @@ namespace CoralArchipelago.EditorTools
             if (camData == null)
                 camData = camGo.AddComponent<UniversalAdditionalCameraData>();
             camData.renderPostProcessing = true;
+            camData.requiresDepthOption = CameraOverrideOption.On;
+            camData.requiresDepthTexture = true;
             camData.antialiasing = AntialiasingMode.None;
 
             // Directional Light (Sun / Moon controlled smoothly by WorldTimeManager)
@@ -1695,15 +1730,15 @@ namespace CoralArchipelago.EditorTools
             AssetDatabase.AddObjectToAsset(tonemapping, profile);
 
             Bloom bloom = profile.Add<Bloom>(true);
-            bloom.threshold.Override(0.90f);
-            bloom.intensity.Override(0.85f);
-            bloom.scatter.Override(0.65f);
+            bloom.threshold.Override(0.85f);
+            bloom.intensity.Override(1.1f);
+            bloom.scatter.Override(0.7f);
             AssetDatabase.AddObjectToAsset(bloom, profile);
 
             ColorAdjustments colorAdj = profile.Add<ColorAdjustments>(true);
             colorAdj.postExposure.Override(0.15f);
             colorAdj.saturation.Override(14f);
-            colorAdj.contrast.Override(10f);
+            colorAdj.contrast.Override(18f);
             AssetDatabase.AddObjectToAsset(colorAdj, profile);
 
             Vignette vignette = profile.Add<Vignette>(true);
@@ -2308,6 +2343,81 @@ namespace CoralArchipelago.EditorTools
             rt.pivot = new Vector2(1f, 1f);
             rt.anchoredPosition = new Vector2(x, y);
             rt.sizeDelta = new Vector2(w, h);
+        }
+
+        [MenuItem("Coral Archipelago/Verify Custom Shaders Compilation")]
+        public static void VerifyCustomShaders()
+        {
+            string[] shaderPaths =
+            {
+                "Assets/_Project/Shaders/IslandTerrainSplatURP.shader",
+                "Assets/_Project/Shaders/TropicalLagoonWaterURP.shader",
+                "Assets/_Project/Shaders/TropicalFoliageWindURP.shader"
+            };
+
+            bool anyError = false;
+            Scene tempScene = EditorSceneManager.NewScene(NewSceneSetup.DefaultGameObjects, NewSceneMode.Single);
+            var camGo = GameObject.Find("Main Camera");
+            Camera cam = camGo != null ? camGo.GetComponent<Camera>() : new GameObject("TempCam").AddComponent<Camera>();
+            var rt = new RenderTexture(128, 128, 24, RenderTextureFormat.DefaultHDR);
+            cam.targetTexture = rt;
+            cam.transform.position = new Vector3(0f, 3f, -8f);
+            cam.transform.LookAt(Vector3.zero);
+            var camData = cam.GetComponent<UniversalAdditionalCameraData>() ?? cam.gameObject.AddComponent<UniversalAdditionalCameraData>();
+            camData.renderPostProcessing = true;
+            camData.requiresDepthOption = CameraOverrideOption.On;
+            camData.requiresDepthTexture = true;
+
+            for (int i = 0; i < shaderPaths.Length; i++)
+            {
+                Shader sh = AssetDatabase.LoadAssetAtPath<Shader>(shaderPaths[i]);
+                if (sh == null)
+                {
+                    Debug.LogError($"[ShaderVerify] Missing shader at {shaderPaths[i]}");
+                    anyError = true;
+                    continue;
+                }
+
+                GameObject quad = GameObject.CreatePrimitive(PrimitiveType.Cube);
+                quad.transform.position = new Vector3((i - 1) * 2.5f, 0f, 0f);
+                var mr = quad.GetComponent<MeshRenderer>();
+                var mat = new Material(sh);
+                mr.sharedMaterial = mat;
+
+                cam.Render();
+
+                int msgCount = ShaderUtil.GetShaderMessageCount(sh);
+                ShaderMessage[] msgs = ShaderUtil.GetShaderMessages(sh);
+                if (ShaderUtil.ShaderHasError(sh))
+                    anyError = true;
+
+                if (msgs != null)
+                {
+                    foreach (ShaderMessage m in msgs)
+                    {
+                        if (m.severity == UnityEditor.Rendering.ShaderCompilerMessageSeverity.Error)
+                        {
+                            anyError = true;
+                            Debug.LogError($"[ShaderVerify] {sh.name} line {m.line}: {m.message}");
+                        }
+                        else
+                        {
+                            Debug.LogWarning($"[ShaderVerify] {sh.name} warning line {m.line}: {m.message}");
+                        }
+                    }
+                }
+
+                Debug.Log($"[ShaderVerify] {sh.name} -> hasError={ShaderUtil.ShaderHasError(sh)}, messages={msgCount}");
+                Object.DestroyImmediate(mat);
+                Object.DestroyImmediate(quad);
+            }
+
+            cam.targetTexture = null;
+            Object.DestroyImmediate(rt);
+            EditorSceneManager.OpenScene($"{ScenesDir}/01_CoralWorld.unity", OpenSceneMode.Single);
+
+            if (anyError)
+                throw new InvalidOperationException("One or more custom URP shaders failed compilation.");
         }
 
         #endregion

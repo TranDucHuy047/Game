@@ -281,7 +281,7 @@ public class IslandRelicAndVolcanoBossSystem : MonoBehaviour
                 relicId = "relic_coral",
                 relicName = "Cổ Ngữ San Hô (Coral Rune)",
                 biomeName = "Vịnh Căn Cứ Altar",
-                worldXZ = new Vector2(24f, 22f),
+                worldXZ = new Vector2(-44f, 42f),
                 hdrColor = new Color(0.12f, 0.96f, 0.84f),
                 isCollected = PlayerPrefs.GetInt("RELIC_relic_coral", 0) == 1
             },

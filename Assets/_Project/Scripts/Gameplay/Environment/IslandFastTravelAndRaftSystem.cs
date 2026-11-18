@@ -138,7 +138,7 @@ public class IslandFastTravelAndRaftSystem : MonoBehaviour
                 id = "wp_starter_bay",
                 displayName = "1. Vịnh Căn Cứ Altar (Starter Bay)",
                 biome = IslandGraphicsUpgrader.BiomeType.StarterCoralBay,
-                worldXZ = new Vector2(0f, 18f),
+                worldXZ = new Vector2(-12f, 4f),
                 portalGlowColor = new Color(0.15f, 0.96f, 0.82f),
                 isUnlocked = true
             },
