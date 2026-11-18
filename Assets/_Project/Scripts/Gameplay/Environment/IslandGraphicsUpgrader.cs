@@ -6,11 +6,13 @@ using UnityEngine.Rendering;
 using UnityEngine.Rendering.Universal;
 using CoralArchipelago.ClientIOS;
 using CoralArchipelago.Core;
+using CoralArchipelago.Gameplay.AI;
 using CoralArchipelago.Gameplay.Coop;
 using CoralArchipelago.Gameplay.Environment;
 using CoralArchipelago.Gameplay.Harvesting;
 using CoralArchipelago.Gameplay.Inventory;
 using CoralArchipelago.Gameplay.Player;
+using CoralArchipelago.Gameplay.Visuals;
 using CoralArchipelago.Networking;
 
 /// <summary>
@@ -61,7 +63,7 @@ public class IslandGraphicsUpgrader : MonoBehaviour
     public float propStreamingRadius = 260f;
     [Tooltip("Radius around players where terrain MeshColliders are enabled (meters).")]
     public float colliderStreamingRadius = 420f;
-    public float waterLevel = -0.4f;
+    public float waterLevel = -2.2f;
     public int worldSeed = 20261118;
 
     [Header("=== 3. SCENE / SHADER WIRING & RETINA iOS ===")]
@@ -147,7 +149,7 @@ public class IslandGraphicsUpgrader : MonoBehaviour
             ForceSharpRetinaRenderScale();
         }
 
-        // Build 16x16 terrain chunks, Central Lagoon, Arch Bridge, Cliffs & Colliders before players move
+        // Build 16x16 terrain chunks, Far Lagoon, Arch Bridge, Cliffs & Colliders before players move
         BuildMassiveChunkedWorld();
     }
 
@@ -160,6 +162,8 @@ public class IslandGraphicsUpgrader : MonoBehaviour
             UpgradeExistingPrimitivesInScene();
         }
 
+        SnapAllSceneObjectsToGround();
+        DisableInvalidAnimatorsInScene();
         UpdateChunkStreamingAndUpgradePrimitives();
         InvokeRepeating(nameof(UpdateChunkStreamingAndUpgradePrimitives), 0.25f, 0.40f);
     }
@@ -384,15 +388,21 @@ public class IslandGraphicsUpgrader : MonoBehaviour
         if (oceanWaterMaterial != null && oceanWaterMaterial.shader.name.Contains("TropicalLagoonWaterURP"))
         {
             _oceanMaterial = oceanWaterMaterial;
-            _oceanMaterial.enableInstancing = true;
         }
         else if (lagoonShader != null)
         {
-            _oceanMaterial = new Material(lagoonShader) { enableInstancing = true };
+            _oceanMaterial = new Material(lagoonShader);
         }
         else
         {
             _oceanMaterial = CreatePBRMaterial(new Color(0.07f, 0.84f, 0.88f, 0.82f), 0.18f, 0.92f, transparent: true);
+        }
+
+        if (_oceanMaterial != null)
+        {
+            _oceanMaterial.enableInstancing = true;
+            if (_oceanMaterial.HasProperty("_WaveAmplitude")) _oceanMaterial.SetFloat("_WaveAmplitude", 0.03f);
+            if (_oceanMaterial.HasProperty("_SpecularStrength")) _oceanMaterial.SetFloat("_SpecularStrength", 0.18f);
         }
 
         // Foliage shaders with GPU vertex wind animation
@@ -531,6 +541,8 @@ public class IslandGraphicsUpgrader : MonoBehaviour
             BuildCentralLagoonScenographyLandmarks();
             BuildNorthernSummitTempleLandmark(new Vector3(0f, EvaluateHeightOnly(0f, 480f), 480f));
         }
+
+        SnapAllSceneObjectsToGround();
     }
 
     private void SetupGiantOceanSurface()
@@ -541,44 +553,57 @@ public class IslandGraphicsUpgrader : MonoBehaviour
         }
         else
         {
-            GameObject existingGo = GameObject.Find("OceanSurface");
+            GameObject existingGo = GameObject.Find("OceanSurface") ?? GameObject.Find("Massive_Ocean_Surface");
             if (existingGo != null)
                 _oceanTransform = existingGo.transform;
         }
 
+        // Remove any duplicate ocean surfaces in Hierarchy so only ONE OceanSurface exists
+        MeshRenderer[] allRenderers = FindObjectsByType<MeshRenderer>(FindObjectsSortMode.None);
+        for (int i = 0; i < allRenderers.Length; i++)
+        {
+            MeshRenderer r = allRenderers[i];
+            if (r == null || r.transform == _oceanTransform)
+                continue;
+
+            string lowerName = r.gameObject.name.ToLowerInvariant();
+            bool isWaterShader = r.sharedMaterial != null && r.sharedMaterial.shader != null &&
+                                 r.sharedMaterial.shader.name.IndexOf("Water", StringComparison.OrdinalIgnoreCase) >= 0;
+            if (lowerName == "oceansurface" || lowerName == "massive_ocean_surface" || isWaterShader)
+            {
+                if (_oceanTransform == null)
+                {
+                    _oceanTransform = r.transform;
+                }
+                else
+                {
+                    Destroy(r.gameObject);
+                }
+            }
+        }
+
         Mesh largeOceanMesh = GenerateSubdividedPlaneMesh(120, worldSize * 1.8f);
 
-        if (_oceanTransform != null)
+        if (_oceanTransform == null)
         {
-            MeshFilter of = _oceanTransform.GetComponent<MeshFilter>();
-            if (of == null) of = _oceanTransform.gameObject.AddComponent<MeshFilter>();
-            of.sharedMesh = largeOceanMesh;
-
-            MeshRenderer or = _oceanTransform.GetComponent<MeshRenderer>();
-            if (or == null) or = _oceanTransform.gameObject.AddComponent<MeshRenderer>();
-            or.sharedMaterial = _oceanMaterial;
-            or.shadowCastingMode = ShadowCastingMode.Off;
-        }
-        else
-        {
-            GameObject oceanObj = new GameObject("Massive_Ocean_Surface");
-            oceanObj.transform.SetParent(transform, false);
-            oceanObj.transform.position = new Vector3(0f, waterLevel, 0f);
+            GameObject oceanObj = new GameObject("OceanSurface");
             _oceanTransform = oceanObj.transform;
-
-            MeshFilter of = oceanObj.AddComponent<MeshFilter>();
-            MeshRenderer or = oceanObj.AddComponent<MeshRenderer>();
-            of.sharedMesh = largeOceanMesh;
-            or.sharedMaterial = _oceanMaterial;
-            or.shadowCastingMode = ShadowCastingMode.Off;
         }
+
+        _oceanTransform.position = new Vector3(0f, waterLevel, 0f);
+        MeshFilter of = _oceanTransform.GetComponent<MeshFilter>() ?? _oceanTransform.gameObject.AddComponent<MeshFilter>();
+        of.sharedMesh = largeOceanMesh;
+
+        MeshRenderer or = _oceanTransform.GetComponent<MeshRenderer>() ?? _oceanTransform.gameObject.AddComponent<MeshRenderer>();
+        or.sharedMaterial = _oceanMaterial;
+        or.shadowCastingMode = ShadowCastingMode.Off;
     }
 
     private void BuildNaturalStoneArchBridge()
     {
-        // Connects South Beach (Z = 6m) to North Lagoon Peninsula (Z = 104m) across turquoise water
-        const float startZ = 6f;
-        const float endZ = 104f;
+        // Connects South Lagoon Shore (Z = 72m) to North Lagoon Peninsula (Z = 148m) across far lagoon (Z = 75..145m)
+        const float startZ = 72f;
+        const float endZ = 148f;
         const int lengthSegs = 28;
         const float halfWidth = 2.75f;
 
@@ -598,20 +623,20 @@ public class IslandGraphicsUpgrader : MonoBehaviour
             mr.sharedMaterial = _mossRockMaterial;
 
             // Stone abutments & arch piers standing in lagoon water so Shoreline Foam rims their bases
-            float[] pierZs = { 28f, 55f, 82f };
+            float[] pierZs = { 90f, 110f, 130f };
             for (int i = 0; i < pierZs.Length; i++)
             {
                 float pz = pierZs[i];
                 for (int side = -1; side <= 1; side += 2)
                 {
                     GameObject pier = CreateMeshPart($"BridgePier_{i}_{side}", bridgeGo.transform, _sharedRockMesh, _mossRockMaterial);
-                    pier.transform.localPosition = new Vector3(side * 2.5f, 0.2f, pz);
+                    pier.transform.localPosition = new Vector3(side * 2.5f, waterLevel - 0.3f, pz);
                     pier.transform.localScale = new Vector3(1.6f, 4.4f, 2.0f);
                 }
             }
 
             // Rustic stone parapet boulders & lanterns at bridge ends
-            for (int zStep = 10; zStep <= 100; zStep += 15)
+            for (int zStep = 78; zStep <= 142; zStep += 16)
             {
                 float archT = Mathf.InverseLerp(startZ, endZ, zStep);
                 float deckY = SampleBridgeDeckHeight(archT, zStep);
@@ -628,8 +653,8 @@ public class IslandGraphicsUpgrader : MonoBehaviour
 
     private float SampleBridgeDeckHeight(float t, float z)
     {
-        float southY = EvaluateHeightOnly(0f, 6f);
-        float northY = EvaluateHeightOnly(0f, 104f);
+        float southY = EvaluateHeightOnly(0f, 72f);
+        float northY = EvaluateHeightOnly(0f, 148f);
         float baseline = Mathf.Lerp(southY, northY, t);
         float archLift = Mathf.Sin(t * Mathf.PI) * 4.4f;
         return baseline + archLift;
@@ -701,15 +726,14 @@ public class IslandGraphicsUpgrader : MonoBehaviour
         GameObject scenoRoot = new GameObject("Central_Lagoon_Scenography");
         scenoRoot.transform.SetParent(transform, false);
 
-        // 1. East Cliff HDR Blue Crystal Outcrops (Right Cliff Wall overlooking Lagoon)
+        // 1. East Cliff HDR Blue Crystal Outcrops (Right Cliff Wall overlooking Far Lagoon Z=75..145m)
         Vector2[] eastCrystalCoords =
         {
-            new Vector2(41f, 22f),
-            new Vector2(44f, 38f),
-            new Vector2(47f, 54f),
-            new Vector2(46f, 70f),
-            new Vector2(43f, 88f),
-            new Vector2(49f, 108f)
+            new Vector2(41f, 84f),
+            new Vector2(44f, 96f),
+            new Vector2(47f, 108f),
+            new Vector2(46f, 120f),
+            new Vector2(43f, 132f)
         };
         for (int i = 0; i < eastCrystalCoords.Length; i++)
         {
@@ -730,9 +754,9 @@ public class IslandGraphicsUpgrader : MonoBehaviour
             }
         }
 
-        // 2. West Cliff Ancient Rune Altar & Cascading Tropical Waterfall (Left Cliff Wall)
+        // 2. West Cliff Ancient Rune Altar & Cascading Tropical Waterfall (Left Cliff Wall at Z=98..112m)
         float altarCliffX = -46f;
-        float altarCliffZ = 42f;
+        float altarCliffZ = 98f;
         float altarCliffY = EvaluateHeightOnly(altarCliffX, altarCliffZ);
 
         GameObject westShrine = new GameObject("WestCliff_Ancient_Rune_Altar");
@@ -751,22 +775,22 @@ public class IslandGraphicsUpgrader : MonoBehaviour
         runeCore.transform.localScale = Vector3.one * 1.45f;
         AddBioGlowLight(westShrine.transform, new Vector3(0f, 2.4f, 0f), new Color(0.18f, 0.96f, 0.85f), 18f);
 
-        // Cascading Waterfall pouring off West Cliff into the Turquoise Lagoon
-        BuildWestCliffWaterfall(scenoRoot.transform, new Vector3(-41f, EvaluateHeightOnly(-41f, 52f), 52f), new Vector3(-25f, waterLevel, 52f));
+        // Cascading Waterfall pouring off West Cliff into the Far Turquoise Lagoon
+        BuildWestCliffWaterfall(scenoRoot.transform, new Vector3(-40f, EvaluateHeightOnly(-40f, 112f), 112f), new Vector3(-24f, waterLevel, 112f));
 
-        // 3. Lush Starter Bay Palm & Fern Grove around the South Beach and Lagoon Shores
+        // 3. Lush Starter Camp Palm & Fern Grove around the Dry Sandy Camp (radius 65m)
         Vector3[] starterPalmPositions =
         {
             new Vector3(-16f, 0f, -14f),
             new Vector3(-24f, 0f, -6f),
-            new Vector3(-19f, 0f, 4f),
+            new Vector3(-19f, 0f, 6f),
             new Vector3(15f, 0f, -15f),
             new Vector3(23f, 0f, -5f),
-            new Vector3(18f, 0f, 5f),
-            new Vector3(-11f, 0f, 114f),
-            new Vector3(11f, 0f, 118f),
-            new Vector3(-28f, 0f, 16f),
-            new Vector3(29f, 0f, 14f)
+            new Vector3(18f, 0f, 8f),
+            new Vector3(-26f, 0f, 26f),
+            new Vector3(26f, 0f, 28f),
+            new Vector3(-18f, 0f, 44f),
+            new Vector3(20f, 0f, 46f)
         };
 
         GameObject groveRoot = new GameObject("StarterBeach_Palm_Fern_Grove");
@@ -775,7 +799,7 @@ public class IslandGraphicsUpgrader : MonoBehaviour
         {
             Vector3 p = starterPalmPositions[i];
             float y = EvaluateHeightOnly(p.x, p.z);
-            if (y < waterLevel + 0.35f) continue;
+            if (y < waterLevel + 0.5f) continue;
 
             GameObject palm = new GameObject($"HeroPalmTree_{i}");
             palm.transform.SetParent(groveRoot.transform, false);
@@ -785,17 +809,17 @@ public class IslandGraphicsUpgrader : MonoBehaviour
             BuildFastPalmTree(palm.transform);
         }
 
-        // Scatter extra fern clusters & mossy rocks on both sides of South Beach & Bridge path
+        // Scatter extra fern clusters & mossy rocks across the Starter Sandy Camp
         System.Random rng = new System.Random(worldSeed ^ 90125);
-        for (int i = 0; i < 36; i++)
+        for (int i = 0; i < 42; i++)
         {
-            float sx = Mathf.Lerp(-32f, 32f, (float)rng.NextDouble());
-            float sz = Mathf.Lerp(-22f, 12f, (float)rng.NextDouble());
+            float sx = Mathf.Lerp(-44f, 44f, (float)rng.NextDouble());
+            float sz = Mathf.Lerp(-28f, 52f, (float)rng.NextDouble());
             // Keep immediate spawn path (0, -8) & central bridge path clear
             if (Mathf.Abs(sx) < 5f && sz > -14f && sz < 10f) continue;
 
             float sy = EvaluateHeightOnly(sx, sz);
-            if (sy < waterLevel + 0.4f) continue;
+            if (sy < waterLevel + 0.5f) continue;
 
             GameObject deco = new GameObject($"BeachUnderstory_{i}");
             deco.transform.SetParent(groveRoot.transform, false);
@@ -904,6 +928,12 @@ public class IslandGraphicsUpgrader : MonoBehaviour
         return h;
     }
 
+    private static float SmoothStepRange(float edge0, float edge1, float x)
+    {
+        float t = Mathf.Clamp01((x - edge0) / Mathf.Max(0.0001f, edge1 - edge0));
+        return t * t * (3f - 2f * t);
+    }
+
     private static void EvaluateWorldCoreStatic(
         float worldX,
         float worldZ,
@@ -918,44 +948,49 @@ public class IslandGraphicsUpgrader : MonoBehaviour
         float distFromCenter = Mathf.Sqrt(worldX * worldX + worldZ * worldZ);
         float normalizedRadius = distFromCenter / (half * 0.92f);
 
-        float warpWeight = Mathf.SmoothStep(0.15f, 0.55f, normalizedRadius);
+        float warpWeight = SmoothStepRange(0.15f, 0.55f, normalizedRadius);
         float coastlineWarp = (Mathf.PerlinNoise(worldX * 0.0018f + 3.1f, worldZ * 0.0018f + 7.4f) - 0.5f) * 0.22f * warpWeight;
         float islandMask = Mathf.Clamp01(1f - Mathf.Pow(Mathf.Max(0f, normalizedRadius + coastlineWarp), 2.15f));
 
         if (islandMask <= 0.05f)
         {
-            finalHeight = -3.5f;
+            finalHeight = -4.5f;
         }
         else
         {
-            // Keep Starter South Beach around player spawn & camp (-30..+8 Z, -30..+30 X) gentle & walkable
-            float starterFlatMask = Mathf.SmoothStep(0f, 1f, Mathf.Clamp01((distFromCenter - 55f) / 65f));
+            // Main camp dry white-gold sand plateau within 65m radius of (0,0): strictly +1.2m to +3.5m (>= 3.4m above waterLevel = -2.2f)
+            float campNoise = Mathf.PerlinNoise(worldX * 0.032f + 13.7f, worldZ * 0.032f + 29.3f);
+            float plateauHeight = Mathf.Clamp(
+                Mathf.Lerp(2.45f, 1.55f, Mathf.Clamp01(distFromCenter / 65f)) + (campNoise - 0.5f) * 0.85f,
+                1.2f,
+                3.5f);
+
+            float outerBlend = SmoothStepRange(65f, 88f, distFromCenter);
+            float starterFlatMask = SmoothStepRange(65f, 120f, distFromCenter);
 
             float nLarge = Mathf.PerlinNoise(worldX * 0.0016f + 11.2f, worldZ * 0.0016f + 5.7f);
             float nMed = Mathf.PerlinNoise(worldX * 0.0045f + 23.4f, worldZ * 0.0045f + 19.1f) * 0.45f;
             float nDetail = Mathf.PerlinNoise(worldX * 0.015f + 41.0f, worldZ * 0.015f + 63.2f) * 0.15f;
             float baseElevation = (nLarge + nMed + nDetail) * 26f * starterFlatMask;
 
-            // Gentle South Beach dunes outside immediate altar/spawn pad
             float beachNoise = Mathf.PerlinNoise(worldX * 0.045f + 5.1f, worldZ * 0.045f + 8.3f) * 1.15f;
 
-            // Central Turquoise Lagoon (Z = 10m..180m, curved bay channels left & right of central bridge headland)
-            float zLagoonBlend = Mathf.SmoothStep(8f, 20f, worldZ) * (1f - Mathf.SmoothStep(165f, 186f, worldZ));
-            float lagoonCurveX = Mathf.Sin(worldZ * 0.028f) * 6f;
-            float lagoonWidth = 28f + (Mathf.PerlinNoise(worldZ * 0.03f, 14.2f) - 0.5f) * 8f;
+            // Far Turquoise Lagoon: ONLY carved at Z = 75m..145m, never overlapping the 65m camp radius around (0,0)
+            float zLagoonBlend = SmoothStepRange(75f, 84f, worldZ) * (1f - SmoothStepRange(136f, 145f, worldZ));
+            float lagoonCurveX = Mathf.Sin(worldZ * 0.032f) * 5f;
+            float lagoonWidth = 30f + (Mathf.PerlinNoise(worldZ * 0.03f, 14.2f) - 0.5f) * 6f;
             float xDistLagoon = Mathf.Abs(worldX - lagoonCurveX);
-            float lagoonOuterMask = (1f - Mathf.SmoothStep(lagoonWidth - 10f, lagoonWidth, xDistLagoon)) * zLagoonBlend;
+            float lagoonOuterMask = (1f - SmoothStepRange(lagoonWidth - 9f, lagoonWidth, xDistLagoon)) * zLagoonBlend;
 
-            // Raised North Headland Peninsula (Z = 98m..185m, |X| < 18m) where North end of Stone Arch Bridge lands
-            float northPeninsulaMask = Mathf.SmoothStep(94f, 112f, worldZ) * (1f - Mathf.SmoothStep(10f, 24f, Mathf.Abs(worldX)));
-            float lagoonCarveMask = Mathf.Clamp01(lagoonOuterMask * (1f - northPeninsulaMask * 0.92f));
+            float radialCampGuard = SmoothStepRange(66f, 75f, distFromCenter);
+            float northPeninsulaMask = SmoothStepRange(134f, 144f, worldZ) * (1f - SmoothStepRange(9f, 20f, Mathf.Abs(worldX)));
+            float lagoonCarveMask = Mathf.Clamp01(lagoonOuterMask * radialCampGuard * (1f - northPeninsulaMask * 0.90f));
 
-            // Twin 8m-18m Mossy Cliff Ridges flanking Left (West) and Right (East) sides of Central Lagoon
-            float cliffZBand = Mathf.SmoothStep(-6f, 18f, worldZ) * (1f - Mathf.SmoothStep(120f, 158f, worldZ));
-            float absX = Mathf.Abs(worldX);
-            float cliffXBand = Mathf.SmoothStep(29f, 42f, absX) * (1f - Mathf.SmoothStep(70f, 95f, absX));
+            // Twin 9.5m-18m Mossy Cliff Ridges flanking Left (West) and Right (East) sides of the Far Lagoon (Z = 75..145m)
+            float cliffZBand = SmoothStepRange(72f, 86f, worldZ) * (1f - SmoothStepRange(134f, 152f, worldZ));
+            float cliffXBand = SmoothStepRange(30f, 44f, Mathf.Abs(worldX)) * (1f - SmoothStepRange(72f, 98f, Mathf.Abs(worldX)));
             float cliffRoughNoise = Mathf.PerlinNoise(worldX * 0.045f + 77f, worldZ * 0.045f + 33f);
-            float framingCliffHeight = cliffZBand * cliffXBand * Mathf.Lerp(9.5f, 18.0f, cliffRoughNoise);
+            float framingCliffHeight = cliffZBand * cliffXBand * Mathf.Lerp(9.5f, 18.0f, cliffRoughNoise) * radialCampGuard;
 
             // Northern Volcanic Summit (0, +480)
             float distNorthPeak = Vector2.Distance(new Vector2(worldX, worldZ), new Vector2(0f, 480f));
@@ -972,8 +1007,10 @@ public class IslandGraphicsUpgrader : MonoBehaviour
             float distSwamp = Vector2.Distance(new Vector2(worldX, worldZ), new Vector2(260f, -260f));
             float swampFactor = Mathf.Clamp01(1f - distSwamp / 250f);
 
-            float landHeight = (1.55f + beachNoise * starterFlatMask + baseElevation + framingCliffHeight + volcanoHeight + canyonHeight) * islandMask - (swampFactor * 2.2f);
-            float lagoonFloorY = -2.65f + (Mathf.PerlinNoise(worldX * 0.06f, worldZ * 0.06f) - 0.5f) * 0.7f;
+            float rawLandHeight = (1.65f + beachNoise * starterFlatMask + baseElevation + framingCliffHeight + volcanoHeight + canyonHeight) * islandMask
+                                - (swampFactor * 2.2f * starterFlatMask);
+            float landHeight = Mathf.Lerp(plateauHeight, rawLandHeight, outerBlend);
+            float lagoonFloorY = -4.2f + (Mathf.PerlinNoise(worldX * 0.06f, worldZ * 0.06f) - 0.5f) * 0.5f;
             finalHeight = Mathf.Lerp(landHeight, lagoonFloorY, lagoonCarveMask);
         }
 
@@ -1502,6 +1539,21 @@ public class IslandGraphicsUpgrader : MonoBehaviour
             _playerTransform = NetworkPlayerController.LocalPlayer.transform;
         }
 
+        // Ensure every player controller (QuickTest or Networked) receives Soldier.glb visual even without a root Capsule MeshRenderer
+        foreach (CharacterController cc in FindObjectsByType<CharacterController>(FindObjectsSortMode.None))
+        {
+            if (cc == null) continue;
+            string n = cc.gameObject.name.ToLowerInvariant();
+            bool isPlayer = n.Contains("player") || cc.CompareTag("Player") ||
+                            cc.GetComponent<NetworkPlayerController>() != null ||
+                            cc.GetComponent<EditorQuickTestPlayerMotor>() != null;
+            if (isPlayer)
+            {
+                _playerTransform = cc.transform;
+                AttachSoldierVisualToPlayer(cc.gameObject);
+            }
+        }
+
         MeshRenderer[] renderers = FindObjectsByType<MeshRenderer>(FindObjectsSortMode.None);
 
         foreach (MeshRenderer mr in renderers)
@@ -1534,7 +1586,7 @@ public class IslandGraphicsUpgrader : MonoBehaviour
             if (objName.Contains("player") || meshName == "Capsule")
             {
                 _playerTransform = go.transform;
-                ReplaceWithVisualModel(go, mr, playerVisualPrefab, BuildStylizedExplorerCharacterVisual);
+                AttachSoldierVisualToPlayer(go);
             }
             else if (objName.Contains("tree") || objName.Contains("wood") || (meshName == "Cylinder" && scale.y > scale.x * 1.4f))
             {
@@ -1569,6 +1621,238 @@ public class IslandGraphicsUpgrader : MonoBehaviour
                 ReplaceWithVisualModel(go, mr, PickRandomPrefab(crystalPrefabs), BuildFastCrystalCluster);
             }
         }
+
+        DisableInvalidAnimatorsInScene();
+    }
+
+    public void SnapAllSceneObjectsToGround()
+    {
+        float minDryTreeHeight = Mathf.Max(waterLevel + 0.5f, 1.2f);
+        var seenIds = new HashSet<int>();
+
+        // 1. All HarvestableResourceNode (PF_CoralWoodNode, PF_GlowCrystalNode)
+        HarvestableResourceNode[] nodes = FindObjectsByType<HarvestableResourceNode>(FindObjectsSortMode.None);
+        for (int i = 0; i < nodes.Length; i++)
+        {
+            if (nodes[i] == null) continue;
+            seenIds.Add(nodes[i].gameObject.GetInstanceID());
+            SnapSingleSceneObjectToGround(nodes[i].gameObject, minDryTreeHeight, i);
+        }
+
+        // 2. Altar, Chests, Cave Gates, Monsters
+        foreach (IslandCoreAltar altar in FindObjectsByType<IslandCoreAltar>(FindObjectsSortMode.None))
+        {
+            if (altar != null && seenIds.Add(altar.gameObject.GetInstanceID()))
+                SnapTransformToGround(altar.transform);
+        }
+        foreach (SharedChestInventory chest in FindObjectsByType<SharedChestInventory>(FindObjectsSortMode.None))
+        {
+            if (chest != null && seenIds.Add(chest.gameObject.GetInstanceID()))
+                SnapTransformToGround(chest.transform);
+        }
+        foreach (TidalCrystalCaveGate gate in FindObjectsByType<TidalCrystalCaveGate>(FindObjectsSortMode.None))
+        {
+            if (gate != null && seenIds.Add(gate.gameObject.GetInstanceID()))
+                SnapTransformToGround(gate.transform);
+        }
+        foreach (ScalableMonsterAI monster in FindObjectsByType<ScalableMonsterAI>(FindObjectsSortMode.None))
+        {
+            if (monster != null && seenIds.Add(monster.gameObject.GetInstanceID()))
+                SnapTransformToGround(monster.transform);
+        }
+
+        // 3. Fallback search by object name in case prefabs were stripped or renamed
+        Transform[] allTransforms = FindObjectsByType<Transform>(FindObjectsSortMode.None);
+        for (int i = 0; i < allTransforms.Length; i++)
+        {
+            Transform t = allTransforms[i];
+            if (t == null || t.parent != null) continue;
+            if (seenIds.Contains(t.gameObject.GetInstanceID())) continue;
+
+            string n = t.name;
+            if (n.StartsWith("PF_CoralWoodNode", StringComparison.OrdinalIgnoreCase) ||
+                n.StartsWith("PF_GlowCrystalNode", StringComparison.OrdinalIgnoreCase) ||
+                n.StartsWith("IslandCoreAltar", StringComparison.OrdinalIgnoreCase) ||
+                n.StartsWith("PF_SharedChest", StringComparison.OrdinalIgnoreCase))
+            {
+                seenIds.Add(t.gameObject.GetInstanceID());
+                SnapSingleSceneObjectToGround(t.gameObject, minDryTreeHeight, i);
+            }
+        }
+    }
+
+    private void SnapSingleSceneObjectToGround(GameObject go, float minDryHeight, int indexHint)
+    {
+        if (go == null) return;
+        Vector3 pos = go.transform.position;
+        bool isWoodTree = go.name.IndexOf("Wood", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                          go.name.IndexOf("Palm", StringComparison.OrdinalIgnoreCase) >= 0;
+
+        float groundY = EvaluateHeightOnly(pos.x, pos.z);
+        if (isWoodTree && groundY < minDryHeight)
+        {
+            Vector2 dryXZ = FindDryLandSpotNear(pos.x, pos.z, minDryHeight, indexHint);
+            pos.x = dryXZ.x;
+            pos.z = dryXZ.y;
+            groundY = EvaluateHeightOnly(pos.x, pos.z);
+        }
+
+        go.transform.position = new Vector3(pos.x, groundY, pos.z);
+
+        if (isWoodTree && !_isHeadlessServer)
+        {
+            EnsureWoodNodePalmVisualVisible(go);
+        }
+    }
+
+    private void SnapTransformToGround(Transform t)
+    {
+        if (t == null) return;
+        Vector3 p = t.position;
+        float gy = EvaluateHeightOnly(p.x, p.z);
+        t.position = new Vector3(p.x, gy, p.z);
+    }
+
+    private Vector2 FindDryLandSpotNear(float origX, float origZ, float minHeight, int seedOffset)
+    {
+        for (int step = 0; step < 36; step++)
+        {
+            float angle = ((step + seedOffset) * 37f) * Mathf.Deg2Rad;
+            float radius = Mathf.Lerp(14f, 52f, (step % 12) / 11f);
+            float cx = Mathf.Cos(angle) * radius;
+            float cz = Mathf.Sin(angle) * radius;
+            if (Mathf.Abs(cx) < 6f && cz > -14f && cz < 10f)
+                continue;
+
+            if (EvaluateHeightOnly(cx, cz) >= minHeight)
+                return new Vector2(cx, cz);
+        }
+
+        return new Vector2(18f + (seedOffset % 4) * 4f, -12f + (seedOffset % 3) * 5f);
+    }
+
+    private void EnsureWoodNodePalmVisualVisible(GameObject woodGo)
+    {
+        if (woodGo == null) return;
+        if (!woodGo.activeSelf) woodGo.SetActive(true);
+
+        Transform visualT = woodGo.transform.Find("PalmTreeVisual");
+        if (visualT == null)
+        {
+            var node = woodGo.GetComponent<HarvestableResourceNode>();
+            if (node != null && node.transform.childCount > 0)
+                visualT = node.transform.GetChild(0);
+        }
+
+        bool hasVisibleMesh = false;
+        foreach (MeshRenderer mr in woodGo.GetComponentsInChildren<MeshRenderer>(true))
+        {
+            if (mr == null) continue;
+            if (!mr.gameObject.activeSelf) mr.gameObject.SetActive(true);
+            if (mr.enabled) hasVisibleMesh = true;
+        }
+
+        if (!hasVisibleMesh)
+        {
+            GameObject holder = visualT != null ? visualT.gameObject : new GameObject("PalmTreeVisual");
+            if (holder.transform.parent != woodGo.transform)
+                holder.transform.SetParent(woodGo.transform, false);
+            holder.transform.localPosition = Vector3.zero;
+            holder.transform.localRotation = Quaternion.identity;
+            BuildFastPalmTree(holder.transform);
+            MarkHierarchyUpgraded(holder);
+        }
+    }
+
+    public void DisableInvalidAnimatorsInScene()
+    {
+        Animator[] animators = FindObjectsByType<Animator>(FindObjectsSortMode.None);
+        for (int i = 0; i < animators.Length; i++)
+        {
+            Animator anim = animators[i];
+            if (anim == null) continue;
+
+            bool invalid = anim.runtimeAnimatorController == null || !anim.isInitialized || anim.layerCount <= 0;
+            if (invalid && anim.enabled)
+            {
+                anim.enabled = false;
+            }
+        }
+    }
+
+    public GameObject AttachSoldierVisualToPlayer(GameObject playerTarget, MeshRenderer optionalPrimitiveRenderer = null)
+    {
+        if (playerTarget == null)
+            return null;
+
+        _upgradedInstanceIds.Add(playerTarget.GetInstanceID());
+
+        if (optionalPrimitiveRenderer != null)
+            optionalPrimitiveRenderer.enabled = false;
+
+        MeshRenderer rootMr = playerTarget.GetComponent<MeshRenderer>();
+        if (rootMr != null)
+            rootMr.enabled = false;
+
+        Transform existingVisual = playerTarget.transform.Find("SoldierVisual");
+        if (existingVisual != null)
+        {
+            MarkHierarchyUpgraded(existingVisual.gameObject);
+            return existingVisual.gameObject;
+        }
+
+        // If PlayerAvatar prefab already includes a working Soldier/Adventurer Animator child, don't stack another one
+        Animator existingAnim = playerTarget.GetComponentInChildren<Animator>(true);
+        if (existingAnim != null && existingAnim.gameObject != playerTarget &&
+            existingAnim.runtimeAnimatorController != null && existingAnim.layerCount > 0)
+        {
+            MarkHierarchyUpgraded(existingAnim.gameObject);
+            return existingAnim.gameObject;
+        }
+
+        GameObject prefab = playerVisualPrefab != null
+            ? playerVisualPrefab
+            : Resources.Load<GameObject>("SoldierPlayerVisual");
+
+        GameObject spawned = null;
+        if (prefab != null)
+        {
+            spawned = Instantiate(prefab, playerTarget.transform);
+            spawned.name = "SoldierVisual";
+
+            float groundBottomOffset = 0f;
+            CharacterController cc = playerTarget.GetComponent<CharacterController>();
+            if (cc != null)
+                groundBottomOffset = cc.center.y - cc.height * 0.5f;
+
+            spawned.transform.localPosition = new Vector3(0f, groundBottomOffset, 0f);
+            spawned.transform.localRotation = Quaternion.identity;
+
+            foreach (Collider col in spawned.GetComponentsInChildren<Collider>(true))
+                Destroy(col);
+            foreach (Unity.Netcode.NetworkObject no in spawned.GetComponentsInChildren<Unity.Netcode.NetworkObject>(true))
+                Destroy(no);
+
+            Animator anim = spawned.GetComponentInChildren<Animator>(true);
+            if (anim != null)
+            {
+                if (anim.runtimeAnimatorController == null || !anim.isInitialized || anim.layerCount <= 0)
+                {
+                    anim.enabled = false;
+                }
+                else
+                {
+                    CharacterAnimationSync animSync = playerTarget.GetComponent<CharacterAnimationSync>();
+                    if (animSync == null)
+                        animSync = playerTarget.AddComponent<CharacterAnimationSync>();
+                    animSync.RefreshTargetAnimator(anim);
+                }
+            }
+
+            MarkHierarchyUpgraded(spawned);
+        }
+
+        return spawned;
     }
 
     private static void AdjustKayKitProportionIfPresent(Transform root)
@@ -1699,19 +1983,11 @@ public class IslandGraphicsUpgrader : MonoBehaviour
     {
         Material goldTrimMat = CreatePBRMaterial(new Color(0.85f, 0.68f, 0.24f), 0.82f, 0.76f);
 
-        GameObject box = GameObject.CreatePrimitive(PrimitiveType.Cube);
-        Destroy(box.GetComponent<Collider>());
-        box.transform.SetParent(parent, false);
+        GameObject box = CreateMeshPart("ChestBody", parent, CreateBoxMesh(0.95f, 0.55f, 0.65f), _barkMaterial);
         box.transform.localPosition = new Vector3(0f, -0.15f, 0f);
-        box.transform.localScale = new Vector3(0.95f, 0.55f, 0.65f);
-        box.GetComponent<MeshRenderer>().sharedMaterial = _barkMaterial;
 
-        GameObject lockPlate = GameObject.CreatePrimitive(PrimitiveType.Cube);
-        Destroy(lockPlate.GetComponent<Collider>());
-        lockPlate.transform.SetParent(parent, false);
+        GameObject lockPlate = CreateMeshPart("ChestLock", parent, CreateBoxMesh(0.16f, 0.24f, 0.06f), goldTrimMat);
         lockPlate.transform.localPosition = new Vector3(0f, 0.05f, 0.34f);
-        lockPlate.transform.localScale = new Vector3(0.16f, 0.24f, 0.06f);
-        lockPlate.GetComponent<MeshRenderer>().sharedMaterial = goldTrimMat;
     }
 
     private void BuildBioluminescentLanternVisual(Transform parent)
@@ -1728,59 +2004,36 @@ public class IslandGraphicsUpgrader : MonoBehaviour
 
     private void BuildDetailedStoneWoodDeckVisual(Transform parent)
     {
+        Mesh plankMesh = CreateBoxMesh(3.8f, 0.22f, 0.70f);
         for (int i = -2; i <= 2; i++)
         {
-            GameObject plank = GameObject.CreatePrimitive(PrimitiveType.Cube);
-            Destroy(plank.GetComponent<Collider>());
-            plank.transform.SetParent(parent, false);
+            GameObject plank = CreateMeshPart("DeckPlank_" + i, parent, plankMesh, _barkMaterial);
             plank.transform.localPosition = new Vector3(0f, 0f, i * 0.76f);
-            plank.transform.localScale = new Vector3(3.8f, 0.22f, 0.70f);
-            plank.GetComponent<MeshRenderer>().sharedMaterial = _barkMaterial;
         }
     }
 
-    private void BuildStylizedExplorerCharacterVisual(Transform parent)
+    private static Mesh CreateBoxMesh(float w, float h, float d)
     {
-        // Realistic explorer proportions (smaller 0.27m head, articulated legs/torso/arms, straw hat, backpack)
-        Material jacketMat = CreatePBRMaterial(new Color(0.16f, 0.34f, 0.48f), 0.12f, 0.42f);
-        Material trouserMat = CreatePBRMaterial(new Color(0.24f, 0.21f, 0.18f), 0.05f, 0.28f);
-        Material skinMat = CreatePBRMaterial(new Color(0.90f, 0.72f, 0.58f), 0.02f, 0.32f);
-        Material hatMat = CreatePBRMaterial(new Color(0.76f, 0.64f, 0.42f), 0.04f, 0.24f);
-
-        for (int side = -1; side <= 1; side += 2)
+        float hx = w * 0.5f, hy = h * 0.5f, hz = d * 0.5f;
+        Mesh m = new Mesh { name = "ProceduralBox" };
+        m.vertices = new[]
         {
-            GameObject leg = CreateMeshPart("ExplorerLeg_" + side, parent, CreateTaperedCylinderMesh(8, 0.10f, 0.12f, 0.72f), trouserMat);
-            leg.transform.localPosition = new Vector3(side * 0.12f, -0.88f, 0f);
-
-            GameObject arm = CreateMeshPart("ExplorerArm_" + side, parent, CreateTaperedCylinderMesh(8, 0.07f, 0.09f, 0.56f), jacketMat);
-            arm.transform.localPosition = new Vector3(side * 0.28f, -0.22f, 0f);
-            arm.transform.localRotation = Quaternion.Euler(0f, 0f, side * -10f);
-        }
-
-        GameObject torso = CreateMeshPart("ExplorerTorso", parent, CreateTaperedCylinderMesh(10, 0.22f, 0.25f, 0.62f), jacketMat);
-        torso.transform.localPosition = new Vector3(0f, -0.20f, 0f);
-
-        GameObject head = GameObject.CreatePrimitive(PrimitiveType.Sphere);
-        Destroy(head.GetComponent<Collider>());
-        head.name = "ExplorerHead";
-        head.transform.SetParent(parent, false);
-        head.transform.localPosition = new Vector3(0f, 0.58f, 0f);
-        head.transform.localScale = new Vector3(0.26f, 0.29f, 0.27f);
-        head.GetComponent<MeshRenderer>().sharedMaterial = skinMat;
-
-        GameObject hatBrim = CreateMeshPart("ExplorerHatBrim", parent, CreateTaperedCylinderMesh(12, 0.28f, 0.26f, 0.05f), hatMat);
-        hatBrim.transform.localPosition = new Vector3(0f, 0.69f, 0f);
-
-        GameObject hatCrown = CreateMeshPart("ExplorerHatCrown", parent, CreateTaperedCylinderMesh(10, 0.15f, 0.12f, 0.12f), hatMat);
-        hatCrown.transform.localPosition = new Vector3(0f, 0.73f, 0f);
-
-        GameObject backpack = GameObject.CreatePrimitive(PrimitiveType.Cube);
-        Destroy(backpack.GetComponent<Collider>());
-        backpack.name = "ExplorerBackpack";
-        backpack.transform.SetParent(parent, false);
-        backpack.transform.localPosition = new Vector3(0f, 0.12f, -0.22f);
-        backpack.transform.localScale = new Vector3(0.32f, 0.44f, 0.18f);
-        backpack.GetComponent<MeshRenderer>().sharedMaterial = _barkMaterial;
+            new Vector3(-hx, -hy, -hz), new Vector3(hx, -hy, -hz), new Vector3(hx, hy, -hz), new Vector3(-hx, hy, -hz),
+            new Vector3(hx, -hy, hz), new Vector3(-hx, -hy, hz), new Vector3(-hx, hy, hz), new Vector3(hx, hy, hz),
+            new Vector3(-hx, hy, -hz), new Vector3(hx, hy, -hz), new Vector3(hx, hy, hz), new Vector3(-hx, hy, hz),
+            new Vector3(-hx, -hy, hz), new Vector3(hx, -hy, hz), new Vector3(hx, -hy, -hz), new Vector3(-hx, -hy, -hz),
+            new Vector3(-hx, -hy, hz), new Vector3(-hx, -hy, -hz), new Vector3(-hx, hy, -hz), new Vector3(-hx, hy, hz),
+            new Vector3(hx, -hy, -hz), new Vector3(hx, -hy, hz), new Vector3(hx, hy, hz), new Vector3(hx, hy, -hz)
+        };
+        m.triangles = new[]
+        {
+            0,2,1, 0,3,2, 4,6,5, 4,7,6,
+            8,10,9, 8,11,10, 12,14,13, 12,15,14,
+            16,18,17, 16,19,18, 20,22,21, 20,23,22
+        };
+        m.RecalculateNormals();
+        m.RecalculateBounds();
+        return m;
     }
 
     private void BuildCoralGuardianMonsterVisual(Transform parent)

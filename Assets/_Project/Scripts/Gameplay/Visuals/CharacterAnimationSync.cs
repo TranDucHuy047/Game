@@ -94,6 +94,15 @@ namespace CoralArchipelago.Gameplay.Visuals
             }
         }
 
+        public void RefreshTargetAnimator(Animator newAnimator = null)
+        {
+            if (newAnimator != null)
+                targetAnimator = newAnimator;
+
+            _initialized = false;
+            ResolveAnimator();
+        }
+
         private void ResolveAnimator()
         {
             if (targetAnimator == null)
@@ -102,6 +111,9 @@ namespace CoralArchipelago.Gameplay.Visuals
             }
 
             if (targetAnimator == null || _initialized)
+                return;
+
+            if (targetAnimator.runtimeAnimatorController == null || !targetAnimator.isInitialized || targetAnimator.layerCount <= 0)
                 return;
 
             _validParameterHashes.Clear();

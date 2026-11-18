@@ -20,8 +20,8 @@ namespace CoralArchipelago.Core
         [SerializeField] private float syncToSaveIntervalSeconds = 10f;
 
         [Header("Shared Tide Configuration")]
-        [SerializeField] private float baseSeaLevelY = 0.0f;
-        [SerializeField] private float tideAmplitudeY = 0.55f;
+        [SerializeField] private float baseSeaLevelY = -2.2f;
+        [SerializeField] private float tideAmplitudeY = 0.05f;
 
         [Header("Client Visuals (Optional in Headless Server)")]
         [SerializeField] private Light directionalSunLight;
@@ -59,8 +59,11 @@ namespace CoralArchipelago.Core
         /// </summary>
         public float GetCurrentSeaLevelY()
         {
+            float seaBase = global::IslandGraphicsUpgrader.Instance != null
+                ? global::IslandGraphicsUpgrader.Instance.waterLevel
+                : baseSeaLevelY;
             float radians = (WorldTimeHours.Value / 12.0f) * Mathf.PI * 2f;
-            return baseSeaLevelY + Mathf.Cos(radians) * tideAmplitudeY;
+            return seaBase + Mathf.Cos(radians) * tideAmplitudeY;
         }
 
         private void Awake()

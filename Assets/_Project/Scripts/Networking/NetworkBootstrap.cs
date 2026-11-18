@@ -80,13 +80,16 @@ namespace CoralArchipelago.Networking
             for (int i = 0; i < args.Length; i++)
             {
                 if (args[i].Equals("-dedicatedServer", StringComparison.OrdinalIgnoreCase) ||
-                    args[i].Equals("-server", StringComparison.OrdinalIgnoreCase) ||
-                    args[i].Equals("-batchmode", StringComparison.OrdinalIgnoreCase))
+                    args[i].Equals("-server", StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+                if (!Application.isEditor && args[i].Equals("-batchmode", StringComparison.OrdinalIgnoreCase))
                 {
                     return true;
                 }
             }
-            return Application.isBatchMode;
+            return !Application.isEditor && Application.isBatchMode;
 #endif
         }
 

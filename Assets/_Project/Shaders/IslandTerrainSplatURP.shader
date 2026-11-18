@@ -4,11 +4,11 @@ Shader "CoralArchipelago/URP/IslandTerrainSplatURP"
     {
         [Header(Layer 1 Wet Shoreline Sand)]
         _WetSandColor ("Wet Sand Color", Color) = (0.42, 0.35, 0.24, 1)
-        _WetSandHeight ("Wet Sand Max Height", Float) = 1.2
+        _WetSandHeight ("Wet Sand Max Height", Float) = -1.0
 
         [Header(Layer 2 Tropical White Gold Sand)]
         _DrySandColor ("Dry Tropical Sand", Color) = (0.94, 0.87, 0.72, 1)
-        _DrySandMaxHeight ("Dry Sand Max Height", Float) = 3.0
+        _DrySandMaxHeight ("Dry Sand Max Height", Float) = 3.6
 
         [Header(Layer 3 Lush Grass And Moss)]
         _GrassColor ("Deep Tropical Grass", Color) = (0.14, 0.45, 0.19, 1)

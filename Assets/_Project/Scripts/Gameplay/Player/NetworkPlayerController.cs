@@ -286,7 +286,7 @@ namespace CoralArchipelago.Gameplay.Player
         {
             float seaLevelY = WorldTimeManager.Instance != null
                 ? WorldTimeManager.Instance.GetCurrentSeaLevelY()
-                : 0f;
+                : (IslandGraphicsUpgrader.Instance != null ? IslandGraphicsUpgrader.Instance.waterLevel : -2.2f);
 
             bool headSubmerged = (transform.position.y + headOffsetY) < seaLevelY;
             if (headSubmerged)

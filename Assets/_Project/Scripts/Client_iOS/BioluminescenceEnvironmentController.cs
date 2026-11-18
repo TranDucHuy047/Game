@@ -13,8 +13,8 @@ namespace CoralArchipelago.ClientIOS
     {
         [Header("Ocean Tide Cycle")]
         [SerializeField] private Transform oceanSurfaceTransform;
-        [SerializeField] private float baseSeaLevelY = 0.0f;
-        [SerializeField] private float tideAmplitudeY = 0.55f;
+        [SerializeField] private float baseSeaLevelY = -2.2f;
+        [SerializeField] private float tideAmplitudeY = 0.05f;
 
         [Header("Day / Night Atmosphere")]
         [SerializeField] private Color dayFogColor = new Color(0.55f, 0.80f, 0.92f, 1f);
@@ -58,9 +58,13 @@ namespace CoralArchipelago.ClientIOS
             if (oceanSurfaceTransform == null)
                 return;
 
+            float seaBase = global::IslandGraphicsUpgrader.Instance != null
+                ? global::IslandGraphicsUpgrader.Instance.waterLevel
+                : baseSeaLevelY;
+
             float nextY = WorldTimeManager.Instance != null
                 ? WorldTimeManager.Instance.GetCurrentSeaLevelY()
-                : baseSeaLevelY + Mathf.Cos((hourOfDay / 12.0f) * Mathf.PI * 2f) * tideAmplitudeY;
+                : seaBase + Mathf.Cos((hourOfDay / 12.0f) * Mathf.PI * 2f) * tideAmplitudeY;
 
             Vector3 pos = oceanSurfaceTransform.position;
             pos.y = nextY;

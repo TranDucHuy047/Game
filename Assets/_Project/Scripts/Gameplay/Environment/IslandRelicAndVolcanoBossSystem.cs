@@ -103,21 +103,25 @@ public class IslandRelicAndVolcanoBossSystem : MonoBehaviour
         if (Unity.Netcode.NetworkManager.Singleton != null && Unity.Netcode.NetworkManager.Singleton.IsListening)
             return;
 
-        GameObject playerGo = GameObject.CreatePrimitive(PrimitiveType.Capsule);
-        playerGo.name = "Player_Explorer_Auto";
+        GameObject playerGo = new GameObject("Player_Explorer_Auto");
         try { playerGo.tag = "Player"; } catch { /* ignore */ }
 
-        DestroyImmediate(playerGo.GetComponent<CapsuleCollider>());
         CharacterController cc = playerGo.AddComponent<CharacterController>();
         cc.height = 1.8f;
-        cc.radius = 0.4f;
-        cc.center = Vector3.zero;
+        cc.radius = 0.38f;
+        cc.center = new Vector3(0f, 0.9f, 0f);
 
         float startY = upgrader != null
             ? upgrader.EvaluateHeightOnly(0f, -8f)
             : IslandGraphicsUpgrader.EvaluateWorldHeightStatic(0f, -8f);
-        playerGo.transform.position = new Vector3(0f, startY + 1.2f, -8f);
+        playerGo.transform.position = new Vector3(0f, startY, -8f);
 
+        if (upgrader != null)
+        {
+            upgrader.AttachSoldierVisualToPlayer(playerGo);
+        }
+
+        playerGo.AddComponent<CoralArchipelago.Gameplay.Visuals.CharacterAnimationSync>();
         playerGo.AddComponent<EditorQuickTestPlayerMotor>();
     }
 
@@ -1017,18 +1021,56 @@ public class EditorQuickTestPlayerMotor : MonoBehaviour
     public float gravity = -20f;
 
     private CharacterController _cc;
+    private Animator _animator;
+    private int _speedParamHash;
+    private bool _hasSpeedParam;
     private float _verticalVelocity;
     private float _cameraYaw;
 
     private void Start()
     {
         _cc = GetComponent<CharacterController>();
+        _speedParamHash = Animator.StringToHash("Speed");
+        ResolveValidAnimator();
+
+        if (Camera.main != null)
+        {
+            Quaternion yawRot = Quaternion.Euler(0f, _cameraYaw, 0f);
+            Camera.main.transform.position = transform.position + yawRot * new Vector3(0f, 4.2f, -7.8f);
+            Camera.main.transform.LookAt(transform.position + Vector3.up * 1.35f);
+        }
+    }
+
+    private void ResolveValidAnimator()
+    {
+        _animator = GetComponentInChildren<Animator>(true);
+        _hasSpeedParam = false;
+        if (_animator == null)
+            return;
+
+        if (_animator.runtimeAnimatorController == null || !_animator.isInitialized || _animator.layerCount <= 0)
+        {
+            _animator.enabled = false;
+            return;
+        }
+
+        foreach (AnimatorControllerParameter p in _animator.parameters)
+        {
+            if (p.nameHash == _speedParamHash)
+            {
+                _hasSpeedParam = true;
+                break;
+            }
+        }
     }
 
     private void Update()
     {
         if (_cc == null || !_cc.enabled)
             return;
+
+        if (_animator == null)
+            ResolveValidAnimator();
 
         float h = Input.GetAxis("Horizontal");
         float v = Input.GetAxis("Vertical");
@@ -1047,6 +1089,7 @@ public class EditorQuickTestPlayerMotor : MonoBehaviour
         if (moveDir.sqrMagnitude > 1f) moveDir.Normalize();
 
         float speed = moveSpeed * (Input.GetKey(KeyCode.LeftShift) ? sprintMultiplier : 1f);
+        float horizontalSpeed = moveDir.magnitude * speed;
 
         if (_cc.isGrounded && _verticalVelocity < 0f)
         {
@@ -1062,11 +1105,16 @@ public class EditorQuickTestPlayerMotor : MonoBehaviour
             transform.rotation = Quaternion.Slerp(transform.rotation, Quaternion.LookRotation(moveDir), 10f * Time.deltaTime);
         }
 
+        if (_animator != null && _animator.isActiveAndEnabled && _hasSpeedParam)
+        {
+            _animator.SetFloat(_speedParamHash, horizontalSpeed, 0.08f, Time.deltaTime);
+        }
+
         if (Camera.main != null)
         {
             Vector3 desiredCamPos = transform.position + yawRot * new Vector3(0f, 4.2f, -7.8f);
             Camera.main.transform.position = Vector3.Lerp(Camera.main.transform.position, desiredCamPos, 12f * Time.deltaTime);
-            Camera.main.transform.LookAt(transform.position + Vector3.up * 1.2f);
+            Camera.main.transform.LookAt(transform.position + Vector3.up * 1.35f);
         }
     }
 }

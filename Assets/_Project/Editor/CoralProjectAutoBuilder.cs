@@ -53,10 +53,12 @@ namespace CoralArchipelago.EditorTools
         private const string UiSpritesDir = "Assets/_Project/UI/Sprites";
         private const string ConfigsDir = "Assets/_Project/Configs";
         private const string ScenesDir = "Assets/_Project/Scenes";
+        private const string ResourcesDir = "Assets/_Project/Resources";
 
         private const string KayKitAdvDir = "Assets/Art/KayKit/Adventurers";
         private const string KayKitSkelDir = "Assets/Art/KayKit/Skeletons";
         private const string KayKitSpaceDir = "Assets/Art/KayKit/SpaceBase";
+        private const string SoldierGlbPath = "Assets/Art/Characters/Soldier.glb";
 
         private static Font _cachedFont;
 
@@ -191,9 +193,10 @@ namespace CoralArchipelago.EditorTools
             Mesh palmCanopyMesh = SaveMeshAsset(GeneratePalmCanopyMesh(), "Mesh_PalmCanopy.asset");
             Mesh crystalClusterMesh = SaveMeshAsset(GenerateCrystalClusterMesh(), "Mesh_CrystalCluster.asset");
 
-            // 3. Animator Controllers from KayKit FBX embedded clips
+            // 3. Animator Controllers from Soldier.glb & KayKit FBX embedded clips
+            EnsureSoldierGlbImportedAsMecanim();
             RuntimeAnimatorController playerAnimCtrl = CreateCharacterAnimatorController(
-                "AC_AdventurerPlayer", $"{KayKitAdvDir}/Barbarian.fbx");
+                "AC_SoldierPlayer", SoldierGlbPath, $"{KayKitAdvDir}/Barbarian.fbx");
             RuntimeAnimatorController monsterAnimCtrl = CreateCharacterAnimatorController(
                 "AC_SkeletonMonster", $"{KayKitSkelDir}/Skeleton_Warrior.fbx");
 
@@ -202,7 +205,8 @@ namespace CoralArchipelago.EditorTools
             Sprite glassButtonSprite = CreateGlassRoundedSprite("SPR_GlassButton", 96, 24, new Color32(18, 42, 66, 205), new Color32(160, 242, 255, 140), 2);
             Sprite glassCircleSprite = CreateCircleSprite("SPR_GlassCircle", 128, new Color32(255, 255, 255, 58), new Color32(170, 245, 255, 165), 3);
 
-            // 5. Network Prefabs (Replacing all CreatePrimitive placeholders)
+            // 5. Network & Visual Prefabs (Replacing all CreatePrimitive placeholders)
+            GameObject soldierVisualPrefab = CreateSoldierVisualPrefab(playerAnimCtrl, advMat ?? coralMat);
             GameObject playerPrefab = CreatePlayerPrefab(advMat, playerAnimCtrl, coralMat);
             GameObject floorPrefab = CreateSpaceFloorPrefab(spaceMat);
             GameObject lampPrefab = CreateSpaceLampPrefab(spaceMat, crystalMat);
@@ -223,6 +227,7 @@ namespace CoralArchipelago.EditorTools
             string worldPath = BuildCoralWorldScene(
                 terrainMat, oceanMat, coralMat, crystalMat, spaceMat,
                 oceanGridMesh, crystalClusterMesh,
+                soldierVisualPrefab,
                 floorPrefab, lampPrefab, chestPrefab,
                 woodNodePrefab, crystalNodePrefab, monsterPrefab,
                 slotBtnPrefab, recipeBtnPrefab,
@@ -251,7 +256,7 @@ namespace CoralArchipelago.EditorTools
             string[] dirs =
             {
                 MaterialsDir, MeshesDir, AnimationsDir,
-                NetworkPrefabsDir, UiPrefabsDir, UiSpritesDir, ConfigsDir, ScenesDir
+                NetworkPrefabsDir, UiPrefabsDir, UiSpritesDir, ConfigsDir, ScenesDir, ResourcesDir
             };
             for (int i = 0; i < dirs.Length; i++)
             {
@@ -334,6 +339,8 @@ namespace CoralArchipelago.EditorTools
             if (shader == null) shader = Shader.Find("Universal Render Pipeline/Lit");
 
             Material mat = GetOrCreateMaterialAsset(path, shader);
+            if (mat.HasProperty("_WetSandHeight")) mat.SetFloat("_WetSandHeight", -1.0f);
+            if (mat.HasProperty("_DrySandMaxHeight")) mat.SetFloat("_DrySandMaxHeight", 3.6f);
             if (mat.HasProperty("_UseVertexBiomeTint")) mat.SetFloat("_UseVertexBiomeTint", 0.32f);
             mat.enableInstancing = true;
             EditorUtility.SetDirty(mat);
@@ -348,6 +355,10 @@ namespace CoralArchipelago.EditorTools
             if (shader == null) shader = Shader.Find("Universal Render Pipeline/Lit");
 
             Material mat = GetOrCreateMaterialAsset(path, shader);
+            if (mat.HasProperty("_WaveAmplitude")) mat.SetFloat("_WaveAmplitude", 0.03f);
+            if (mat.HasProperty("_SpecularStrength")) mat.SetFloat("_SpecularStrength", 0.18f);
+            if (mat.HasProperty("_WaveFrequency")) mat.SetFloat("_WaveFrequency", 0.24f);
+            if (mat.HasProperty("_WaveSpeed")) mat.SetFloat("_WaveSpeed", 0.55f);
             mat.enableInstancing = true;
             EditorUtility.SetDirty(mat);
             return mat;
@@ -655,6 +666,7 @@ namespace CoralArchipelago.EditorTools
         private static Mesh GeneratePalmCanopyMesh()
         {
             var verts = new List<Vector3>();
+            var uvs = new List<Vector2>();
             var tris = new List<int>();
 
             Vector3 crownPos = new Vector3(0.49f, 4.18f, 0.30f);
@@ -680,6 +692,9 @@ namespace CoralArchipelago.EditorTools
                     verts.Add(spine - right * halfW + Vector3.down * 0.08f);
                     verts.Add(spine + Vector3.up * 0.06f);
                     verts.Add(spine + right * halfW + Vector3.down * 0.08f);
+                    uvs.Add(new Vector2(0f, t));
+                    uvs.Add(new Vector2(0.5f, t));
+                    uvs.Add(new Vector2(1f, t));
                 }
 
                 for (int s = 0; s < frondSegs; s++)
@@ -693,7 +708,7 @@ namespace CoralArchipelago.EditorTools
                 }
             }
 
-            var mesh = new Mesh { name = "PalmCanopy", vertices = verts.ToArray(), triangles = tris.ToArray() };
+            var mesh = new Mesh { name = "PalmCanopy", vertices = verts.ToArray(), uv = uvs.ToArray(), triangles = tris.ToArray() };
             mesh.RecalculateNormals();
             mesh.RecalculateBounds();
             return mesh;
@@ -775,30 +790,41 @@ namespace CoralArchipelago.EditorTools
 
         #region Animator Controllers & KayKit Model Helpers
 
-        private static RuntimeAnimatorController CreateCharacterAnimatorController(string ctrlName, string fbxPath)
+        private static RuntimeAnimatorController CreateCharacterAnimatorController(
+            string ctrlName,
+            string primaryModelPath,
+            string secondaryModelPath = null)
         {
             string ctrlPath = $"{AnimationsDir}/{ctrlName}.controller";
-            Object[] allAssets = AssetDatabase.LoadAllAssetsAtPath(fbxPath);
             var clips = new List<AnimationClip>();
-            if (allAssets != null)
+
+            CollectModelAnimationClips(primaryModelPath, clips);
+            if (clips.Count == 0 && !string.IsNullOrEmpty(secondaryModelPath))
             {
-                for (int i = 0; i < allAssets.Length; i++)
-                {
-                    if (allAssets[i] is AnimationClip clip && !clip.name.StartsWith("__preview__"))
-                    {
-                        clips.Add(clip);
-                    }
-                }
+                CollectModelAnimationClips(secondaryModelPath, clips);
             }
 
+            Debug.Log($"[CoralProjectAutoBuilder] {ctrlName}: collected {clips.Count} clips from {primaryModelPath}");
+
             AnimationClip idleClip = ExtractStandaloneClip(ctrlName, "Idle", FindClipByKeywords(clips, "Idle_A", "Idle", "Combat_Idle"), loop: true);
-            AnimationClip walkClip = ExtractStandaloneClip(ctrlName, "Walk", FindClipByKeywords(clips, "Walking_A", "Walking_B", "Walk"), loop: true);
-            AnimationClip runClip = ExtractStandaloneClip(ctrlName, "Run", FindClipByKeywords(clips, "Running_A", "Running_B", "Run"), loop: true);
-            AnimationClip attackClip = ExtractStandaloneClip(ctrlName, "Attack", FindClipByKeywords(clips, "1H_Melee_Attack_Chop", "1H_Melee_Attack_Slice", "Chop", "Attack"), loop: false);
-            AnimationClip hitClip = ExtractStandaloneClip(ctrlName, "Hit", FindClipByKeywords(clips, "Hit_A", "Hit_B", "Hit"), loop: false);
-            AnimationClip deathClip = ExtractStandaloneClip(ctrlName, "Death", FindClipByKeywords(clips, "Death_A", "Death_B", "Death"), loop: false);
+            AnimationClip walkClip = ExtractStandaloneClip(ctrlName, "Walk", FindClipByKeywords(clips, "Walk", "Walking_A", "Walking_B"), loop: true);
+            AnimationClip runClip = ExtractStandaloneClip(ctrlName, "Run", FindClipByKeywords(clips, "Run", "Running_A", "Running_B"), loop: true);
+            AnimationClip attackClip = ExtractStandaloneClip(ctrlName, "Attack", FindClipByKeywords(clips, "1H_Melee_Attack_Chop", "1H_Melee_Attack_Slice", "Chop", "Attack", "Run"), loop: false);
+            AnimationClip hitClip = ExtractStandaloneClip(ctrlName, "Hit", FindClipByKeywords(clips, "Hit_A", "Hit_B", "Hit", "Idle"), loop: false);
+            AnimationClip deathClip = ExtractStandaloneClip(ctrlName, "Death", FindClipByKeywords(clips, "Death_A", "Death_B", "Death", "Idle"), loop: false);
+
+            if (AssetDatabase.LoadAssetAtPath<Object>(ctrlPath) != null)
+            {
+                AssetDatabase.DeleteAsset(ctrlPath);
+                AssetDatabase.SaveAssets();
+            }
 
             AnimatorController controller = AnimatorController.CreateAnimatorControllerAtPath(ctrlPath);
+            if (controller.layers == null || controller.layers.Length == 0)
+            {
+                controller.AddLayer("Base Layer");
+            }
+
             controller.AddParameter("Speed", AnimatorControllerParameterType.Float);
             controller.AddParameter("Attack", AnimatorControllerParameterType.Trigger);
             controller.AddParameter("Hit", AnimatorControllerParameterType.Trigger);
@@ -816,19 +842,19 @@ namespace CoralArchipelago.EditorTools
             runState.motion = runClip != null ? runClip : walkState.motion;
 
             AnimatorState attackState = sm.AddState("Attack");
-            attackState.motion = attackClip;
+            attackState.motion = attackClip != null ? attackClip : idleClip;
 
             AnimatorState hitState = sm.AddState("Hit");
-            hitState.motion = hitClip;
+            hitState.motion = hitClip != null ? hitClip : idleClip;
 
             AnimatorState deathState = sm.AddState("Death");
-            deathState.motion = deathClip;
+            deathState.motion = deathClip != null ? deathClip : idleClip;
 
             // Locomotion transitions
             AddParamTransition(idleState, walkState, AnimatorConditionMode.Greater, 0.25f, "Speed", 0.12f);
             AddParamTransition(walkState, idleState, AnimatorConditionMode.Less, 0.18f, "Speed", 0.15f);
-            AddParamTransition(walkState, runState, AnimatorConditionMode.Greater, 5.2f, "Speed", 0.12f);
-            AddParamTransition(runState, walkState, AnimatorConditionMode.Less, 4.7f, "Speed", 0.12f);
+            AddParamTransition(walkState, runState, AnimatorConditionMode.Greater, 10.5f, "Speed", 0.12f);
+            AddParamTransition(runState, walkState, AnimatorConditionMode.Less, 9.8f, "Speed", 0.12f);
 
             // Attack & Hit AnyState triggers
             AnimatorStateTransition anyToAttack = sm.AddAnyStateTransition(attackState);
@@ -865,7 +891,49 @@ namespace CoralArchipelago.EditorTools
             deathToIdle.duration = 0.12f;
 
             EditorUtility.SetDirty(controller);
-            return controller;
+            AssetDatabase.SaveAssetIfDirty(controller);
+            AssetDatabase.SaveAssets();
+            AssetDatabase.ImportAsset(ctrlPath, ImportAssetOptions.ForceUpdate);
+            return AssetDatabase.LoadAssetAtPath<RuntimeAnimatorController>(ctrlPath);
+        }
+
+        private static void EnsureSoldierGlbImportedAsMecanim()
+        {
+            if (!File.Exists(SoldierGlbPath))
+                return;
+
+            AssetDatabase.ImportAsset(SoldierGlbPath, ImportAssetOptions.ForceSynchronousImport);
+            AssetImporter importer = AssetImporter.GetAtPath(SoldierGlbPath);
+            if (importer == null)
+                return;
+
+            var so = new SerializedObject(importer);
+            SerializedProperty animProp = so.FindProperty("importSettings.animationMethod") ?? so.FindProperty("animationMethod");
+            if (animProp != null && animProp.propertyType == SerializedPropertyType.Enum && animProp.intValue != 2)
+            {
+                animProp.intValue = 2; // 2 = Mecanim in glTFast AnimationMethod
+                so.ApplyModifiedPropertiesWithoutUndo();
+                importer.SaveAndReimport();
+                Debug.Log("[CoralProjectAutoBuilder] Configured Soldier.glb glTFast animationMethod = Mecanim.");
+            }
+        }
+
+        private static void CollectModelAnimationClips(string modelPath, List<AnimationClip> clips)
+        {
+            if (string.IsNullOrEmpty(modelPath) || !File.Exists(modelPath))
+                return;
+
+            Object[] allAssets = AssetDatabase.LoadAllAssetsAtPath(modelPath);
+            if (allAssets == null)
+                return;
+
+            for (int i = 0; i < allAssets.Length; i++)
+            {
+                if (allAssets[i] is AnimationClip clip && !clip.name.StartsWith("__preview__"))
+                {
+                    clips.Add(clip);
+                }
+            }
         }
 
         private static AnimationClip FindClipByKeywords(List<AnimationClip> clips, params string[] keywords)
@@ -901,6 +969,7 @@ namespace CoralArchipelago.EditorTools
             string clipPath = $"{AnimationsDir}/{prefix}_{stateName}.anim";
             AnimationClip copy = Object.Instantiate(sourceClip);
             copy.name = $"{prefix}_{stateName}";
+            copy.legacy = false;
 
             AnimationClipSettings settings = AnimationUtility.GetAnimationClipSettings(copy);
             settings.loopTime = loop;
@@ -928,23 +997,83 @@ namespace CoralArchipelago.EditorTools
             tr.duration = duration;
         }
 
-        private static GameObject InstantiateKayKitModel(string fbxPath, Transform parent, Material mat)
+        private static GameObject InstantiateKayKitModel(string fbxPath, Transform parent, Material mat, bool keepRootAnimator = false)
         {
             GameObject asset = AssetDatabase.LoadAssetAtPath<GameObject>(fbxPath);
             if (asset == null)
             {
-                Debug.LogWarning($"[CoralProjectAutoBuilder] KayKit model missing at {fbxPath}, falling back to capsule.");
-                GameObject fallback = GameObject.CreatePrimitive(PrimitiveType.Capsule);
-                Object.DestroyImmediate(fallback.GetComponent<Collider>());
-                fallback.transform.SetParent(parent, false);
-                ApplyMaterialRecursive(fallback, mat);
-                return fallback;
+                Debug.LogWarning($"[CoralProjectAutoBuilder] Model missing at {fbxPath}.");
+                GameObject empty = new GameObject("MissingModel");
+                empty.transform.SetParent(parent, false);
+                return empty;
             }
 
             GameObject inst = (GameObject)PrefabUtility.InstantiatePrefab(asset, parent);
             StripCollidersRecursive(inst);
             ApplyMaterialRecursive(inst, mat);
+            if (!keepRootAnimator)
+            {
+                StripEmptyAnimators(inst);
+            }
             return inst;
+        }
+
+        private static GameObject InstantiateSoldierModel(Transform parent, RuntimeAnimatorController animCtrl, Material fallbackMat)
+        {
+            GameObject asset = AssetDatabase.LoadAssetAtPath<GameObject>(SoldierGlbPath);
+            if (asset == null && File.Exists(SoldierGlbPath))
+            {
+                AssetDatabase.ImportAsset(SoldierGlbPath, ImportAssetOptions.ForceSynchronousImport | ImportAssetOptions.ForceUpdate);
+                asset = AssetDatabase.LoadAssetAtPath<GameObject>(SoldierGlbPath);
+            }
+
+            if (asset == null)
+            {
+                Debug.LogWarning($"[CoralProjectAutoBuilder] Soldier.glb missing at {SoldierGlbPath}, falling back to KayKit Barbarian.");
+                GameObject fallback = InstantiateKayKitModel($"{KayKitAdvDir}/Barbarian.fbx", parent, fallbackMat, keepRootAnimator: true);
+                Animator fbAnim = fallback.GetComponentInChildren<Animator>(true) ?? fallback.AddComponent<Animator>();
+                fbAnim.runtimeAnimatorController = animCtrl;
+                fbAnim.applyRootMotion = false;
+                StripEmptyAnimators(fallback);
+                return fallback;
+            }
+
+            GameObject inst = PrefabUtility.IsPartOfPrefabAsset(asset)
+                ? (GameObject)PrefabUtility.InstantiatePrefab(asset, parent)
+                : Object.Instantiate(asset, parent);
+            inst.name = "SoldierModel";
+            inst.transform.localPosition = Vector3.zero;
+            inst.transform.localRotation = Quaternion.Euler(0f, 180f, 0f);
+
+            StripCollidersRecursive(inst);
+            foreach (Animation legacyAnim in inst.GetComponentsInChildren<Animation>(true))
+            {
+                Object.DestroyImmediate(legacyAnim);
+            }
+
+            Animator animator = inst.GetComponentInChildren<Animator>(true);
+            if (animator == null)
+                animator = inst.AddComponent<Animator>();
+            animator.runtimeAnimatorController = animCtrl;
+            animator.applyRootMotion = false;
+
+            foreach (Animator extra in inst.GetComponentsInChildren<Animator>(true))
+            {
+                if (extra != animator && extra.runtimeAnimatorController == null)
+                    Object.DestroyImmediate(extra);
+            }
+
+            return inst;
+        }
+
+        private static void StripEmptyAnimators(GameObject root)
+        {
+            if (root == null) return;
+            foreach (Animator a in root.GetComponentsInChildren<Animator>(true))
+            {
+                if (a != null && a.runtimeAnimatorController == null)
+                    Object.DestroyImmediate(a);
+            }
         }
 
         private static void AttachWeaponToHandBone(
@@ -967,6 +1096,7 @@ namespace CoralArchipelago.EditorTools
             weaponInst.transform.localPosition = localOffset;
             weaponInst.transform.localRotation = Quaternion.Euler(localEuler);
             StripCollidersRecursive(weaponInst);
+            StripEmptyAnimators(weaponInst);
             ApplyMaterialRecursive(weaponInst, mat);
         }
 
@@ -1021,15 +1151,26 @@ namespace CoralArchipelago.EditorTools
 
         #region Network & UI Prefabs
 
+        private static GameObject CreateSoldierVisualPrefab(RuntimeAnimatorController animCtrl, Material fallbackMat)
+        {
+            string path = $"{ResourcesDir}/SoldierPlayerVisual.prefab";
+            var root = new GameObject("SoldierPlayerVisual");
+            InstantiateSoldierModel(root.transform, animCtrl, fallbackMat);
+
+            GameObject saved = PrefabUtility.SaveAsPrefabAsset(root, path);
+            Object.DestroyImmediate(root);
+            return saved;
+        }
+
         private static GameObject CreatePlayerPrefab(Material advMat, RuntimeAnimatorController animCtrl, Material fallbackMat)
         {
             string path = $"{NetworkPrefabsDir}/PlayerAvatar.prefab";
             var root = new GameObject("PlayerAvatar");
 
             var cc = root.AddComponent<CharacterController>();
-            cc.center = new Vector3(0f, 1.0f, 0f);
-            cc.height = 2.0f;
-            cc.radius = 0.42f;
+            cc.center = new Vector3(0f, 0.9f, 0f);
+            cc.height = 1.8f;
+            cc.radius = 0.38f;
 
             root.AddComponent<NetworkObject>();
             root.AddComponent<NetworkTransform>();
@@ -1038,29 +1179,12 @@ namespace CoralArchipelago.EditorTools
             var animSync = root.AddComponent<CharacterAnimationSync>();
             root.AddComponent<NetworkPlayerController>();
 
-            GameObject model = InstantiateKayKitModel($"{KayKitAdvDir}/Barbarian.fbx", root.transform, advMat ?? fallbackMat);
-            model.name = "AdventurerModel";
-            model.transform.localPosition = Vector3.zero;
-            model.transform.localRotation = Quaternion.identity;
-
+            GameObject model = InstantiateSoldierModel(root.transform, animCtrl, advMat ?? fallbackMat);
             Animator animator = model.GetComponentInChildren<Animator>(true);
-            if (animator == null)
-                animator = model.AddComponent<Animator>();
-            animator.runtimeAnimatorController = animCtrl;
-            animator.applyRootMotion = false;
 
             var animSo = new SerializedObject(animSync);
             animSo.FindProperty("targetAnimator").objectReferenceValue = animator;
             animSo.ApplyModifiedPropertiesWithoutUndo();
-
-            AttachWeaponToHandBone(
-                model,
-                $"{KayKitAdvDir}/axe_1handed.fbx",
-                advMat,
-                Vector3.zero,
-                new Vector3(0f, 0f, 0f));
-
-            AdjustKayKitPlayerProportions(model);
 
             GameObject saved = PrefabUtility.SaveAsPrefabAsset(root, path);
             Object.DestroyImmediate(root);
@@ -1273,7 +1397,7 @@ namespace CoralArchipelago.EditorTools
             var visual = new GameObject("SkeletonGuardianVisual");
             visual.transform.SetParent(root.transform, false);
 
-            GameObject model = InstantiateKayKitModel($"{KayKitSkelDir}/Skeleton_Warrior.fbx", visual.transform, skelMat);
+            GameObject model = InstantiateKayKitModel($"{KayKitSkelDir}/Skeleton_Warrior.fbx", visual.transform, skelMat, keepRootAnimator: true);
             model.name = "SkeletonWarriorModel";
 
             Animator animator = model.GetComponentInChildren<Animator>(true);
@@ -1281,6 +1405,7 @@ namespace CoralArchipelago.EditorTools
                 animator = model.AddComponent<Animator>();
             animator.runtimeAnimatorController = animCtrl;
             animator.applyRootMotion = false;
+            StripEmptyAnimators(model);
 
             var animSo = new SerializedObject(animSync);
             animSo.FindProperty("targetAnimator").objectReferenceValue = animator;
@@ -1458,6 +1583,7 @@ namespace CoralArchipelago.EditorTools
             Material spaceMat,
             Mesh oceanGridMesh,
             Mesh crystalClusterMesh,
+            GameObject soldierVisualPrefab,
             GameObject floorPrefab,
             GameObject lampPrefab,
             GameObject chestPrefab,
@@ -1501,11 +1627,11 @@ namespace CoralArchipelago.EditorTools
             SetupTropicalSkybox();
             SetupGlobalPostProcessingVolume();
 
-            // Subdivided 3600m Ocean Surface (Gerstner 3D Waves)
+            // Single 3600m Ocean Surface at waterLevel = -2.2f
             var oceanGo = new GameObject("OceanSurface", typeof(MeshFilter), typeof(MeshRenderer));
             oceanGo.GetComponent<MeshFilter>().sharedMesh = oceanGridMesh;
             oceanGo.GetComponent<MeshRenderer>().sharedMaterial = oceanMat;
-            oceanGo.transform.position = Vector3.zero;
+            oceanGo.transform.position = new Vector3(0f, -2.2f, 0f);
 
             // 2.000m x 2.000m Continent Generator (16x16 Chunks, 5 Biomes, Deterministic Streaming)
             var continentGo = new GameObject("IslandWorldUpgrader_2000m");
@@ -1515,6 +1641,8 @@ namespace CoralArchipelago.EditorTools
             upgraderSo.FindProperty("continentTerrainMaterial").objectReferenceValue = terrainMat;
             upgraderSo.FindProperty("oceanWaterMaterial").objectReferenceValue = oceanMat;
             upgraderSo.FindProperty("glowingCrystalMaterial").objectReferenceValue = crystalMat;
+            upgraderSo.FindProperty("playerVisualPrefab").objectReferenceValue = soldierVisualPrefab;
+            upgraderSo.FindProperty("waterLevel").floatValue = -2.2f;
             upgraderSo.FindProperty("altarPrefab").objectReferenceValue = null;
             upgraderSo.FindProperty("chestPrefab").objectReferenceValue = chestPrefab;
             upgraderSo.FindProperty("lampPrefab").objectReferenceValue = lampPrefab;
@@ -1527,7 +1655,7 @@ namespace CoralArchipelago.EditorTools
             float gateGroundY = IslandGraphicsUpgrader.EvaluateWorldHeightStatic(18f, 11f);
             GameObject caveGateGo = InstantiateKayKitModel($"{KayKitSpaceDir}/structure_low.fbx", null, spaceMat);
             caveGateGo.name = "TidalCrystalCaveGate";
-            caveGateGo.transform.position = new Vector3(18f, Mathf.Max(0.4f, gateGroundY), 11f);
+            caveGateGo.transform.position = new Vector3(18f, gateGroundY, 11f);
             caveGateGo.transform.rotation = Quaternion.Euler(0f, 35f, 0f);
             caveGateGo.transform.localScale = new Vector3(1.6f, 1.8f, 1.2f);
             BoxCollider gateCol = caveGateGo.AddComponent<BoxCollider>();

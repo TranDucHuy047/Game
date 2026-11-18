@@ -414,7 +414,7 @@ public class IslandFastTravelAndRaftSystem : MonoBehaviour
     private void SpawnCoastalSailingRaft()
     {
         float waterY = GetActiveWaterLevel();
-        Vector3 dockPos = new Vector3(16f, waterY + 0.08f, -26f);
+        Vector3 dockPos = new Vector3(14f, waterY + 0.08f, 88f);
 
         GameObject raftGo = new GameObject("Coastal_Sailing_Raft");
         raftGo.transform.SetParent(transform, false);
@@ -770,7 +770,7 @@ public class IslandFastTravelAndRaftSystem : MonoBehaviour
         if (WorldTimeManager.Instance != null)
             return WorldTimeManager.Instance.GetCurrentSeaLevelY();
 
-        return _worldUpgrader != null ? _worldUpgrader.waterLevel : -0.4f;
+        return _worldUpgrader != null ? _worldUpgrader.waterLevel : -2.2f;
     }
 
     private float SampleGroundHeight(float worldX, float worldZ)

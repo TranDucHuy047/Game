@@ -90,7 +90,7 @@ namespace CoralArchipelago.UI
             };
 
             float halfWorld = worldSize * 0.5f;
-            float waterLevel = IslandGraphicsUpgrader.Instance != null ? IslandGraphicsUpgrader.Instance.waterLevel : -0.4f;
+            float waterLevel = IslandGraphicsUpgrader.Instance != null ? IslandGraphicsUpgrader.Instance.waterLevel : -2.2f;
             float mapWidth = IslandGraphicsUpgrader.Instance != null ? IslandGraphicsUpgrader.Instance.worldSize : worldSize;
             float peakHeight = IslandGraphicsUpgrader.Instance != null ? IslandGraphicsUpgrader.Instance.maxMountainHeight : maxMountainHeight;
             worldSize = mapWidth;
