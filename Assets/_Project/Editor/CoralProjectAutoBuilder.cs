@@ -159,10 +159,8 @@ namespace CoralArchipelago.EditorTools
             Material skelMat = CreateOrLoadTexturedLitMaterial("MAT_KayKit_Skeleton.mat", $"{KayKitSkelDir}/skeleton_texture.png");
             Material spaceMat = CreateOrLoadTexturedLitMaterial("MAT_KayKit_SpaceBase.mat", $"{KayKitSpaceDir}/spacebits_texture.png");
 
-            // 2. Procedural 3D Meshes (Island Terrains, Subdivided Ocean, Palm Tree, Crystal Cluster)
-            Mesh mainIslandMesh = SaveMeshAsset(GenerateIslandMesh("MainIsland", 76f, 96, 14f, 6.2f, 11), "Mesh_MainCoralIsland.asset");
-            Mesh crystalIslandMesh = SaveMeshAsset(GenerateIslandMesh("CrystalIsland", 38f, 56, 7f, 4.4f, 47), "Mesh_CrystalReefIsland.asset");
-            Mesh oceanGridMesh = SaveMeshAsset(GenerateOceanGridMesh(340f, 120), "Mesh_OceanGrid.asset");
+            // 2. Procedural 3D Meshes (3600m Ocean, Palm Tree, Crystal Cluster; 2000m Island Chunks built by IslandGraphicsUpgrader)
+            Mesh oceanGridMesh = SaveMeshAsset(GenerateOceanGridMesh(3600f, 96), "Mesh_OceanGrid.asset");
             Mesh palmTrunkMesh = SaveMeshAsset(GeneratePalmTrunkMesh(), "Mesh_PalmTrunk.asset");
             Mesh palmCanopyMesh = SaveMeshAsset(GeneratePalmCanopyMesh(), "Mesh_PalmCanopy.asset");
             Mesh crystalClusterMesh = SaveMeshAsset(GenerateCrystalClusterMesh(), "Mesh_CrystalCluster.asset");
@@ -198,7 +196,7 @@ namespace CoralArchipelago.EditorTools
             string bootstrapPath = BuildBootstrapScene(playerPrefab, netPrefabsList, glassCardSprite, glassButtonSprite);
             string worldPath = BuildCoralWorldScene(
                 terrainMat, oceanMat, coralMat, crystalMat, spaceMat,
-                mainIslandMesh, crystalIslandMesh, oceanGridMesh, crystalClusterMesh,
+                oceanGridMesh, crystalClusterMesh,
                 floorPrefab, lampPrefab, chestPrefab,
                 woodNodePrefab, crystalNodePrefab, monsterPrefab,
                 slotBtnPrefab, recipeBtnPrefab,
@@ -258,7 +256,7 @@ namespace CoralArchipelago.EditorTools
             urpAsset.renderScale = 1.0f;
             urpAsset.supportsCameraDepthTexture = true;
             urpAsset.supportsHDR = true;
-            urpAsset.shadowDistance = 65f;
+            urpAsset.shadowDistance = 120f;
             urpAsset.msaaSampleCount = 4;
             EditorUtility.SetDirty(urpAsset);
 
@@ -308,6 +306,8 @@ namespace CoralArchipelago.EditorTools
             if (shader == null) shader = Shader.Find("Universal Render Pipeline/Lit");
 
             Material mat = GetOrCreateMaterialAsset(path, shader);
+            if (mat.HasProperty("_UseVertexBiomeColor")) mat.SetFloat("_UseVertexBiomeColor", 1.0f);
+            mat.enableInstancing = true;
             EditorUtility.SetDirty(mat);
             return mat;
         }
@@ -319,6 +319,7 @@ namespace CoralArchipelago.EditorTools
             if (shader == null) shader = Shader.Find("Universal Render Pipeline/Lit");
 
             Material mat = GetOrCreateMaterialAsset(path, shader);
+            mat.enableInstancing = true;
             EditorUtility.SetDirty(mat);
             return mat;
         }
@@ -1396,8 +1397,6 @@ namespace CoralArchipelago.EditorTools
             Material coralMat,
             Material crystalMat,
             Material spaceMat,
-            Mesh mainIslandMesh,
-            Mesh crystalIslandMesh,
             Mesh oceanGridMesh,
             Mesh crystalClusterMesh,
             GameObject floorPrefab,
@@ -1414,13 +1413,15 @@ namespace CoralArchipelago.EditorTools
         {
             Scene scene = EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
 
-            // Camera with Post-Processing enabled
+            // Camera with Post-Processing & 2400m open-world horizon
             var camGo = new GameObject("Main Camera", typeof(Camera), typeof(AudioListener));
             camGo.tag = "MainCamera";
             camGo.transform.position = new Vector3(0f, 6f, -9f);
             Camera mainCam = camGo.GetComponent<Camera>();
             mainCam.allowHDR = true;
             mainCam.allowMSAA = true;
+            mainCam.nearClipPlane = 0.2f;
+            mainCam.farClipPlane = 2400f;
             var camData = camGo.GetComponent<UniversalAdditionalCameraData>();
             if (camData == null)
                 camData = camGo.AddComponent<UniversalAdditionalCameraData>();
@@ -1439,18 +1440,28 @@ namespace CoralArchipelago.EditorTools
             SetupTropicalSkybox();
             SetupGlobalPostProcessingVolume();
 
-            // Subdivided Ocean Surface (Gerstner 3D Waves)
+            // Subdivided 3600m Ocean Surface (Gerstner 3D Waves)
             var oceanGo = new GameObject("OceanSurface", typeof(MeshFilter), typeof(MeshRenderer));
             oceanGo.GetComponent<MeshFilter>().sharedMesh = oceanGridMesh;
             oceanGo.GetComponent<MeshRenderer>().sharedMaterial = oceanMat;
             oceanGo.transform.position = Vector3.zero;
 
-            // 3D Procedural Island Terrains (Splatmap Sand - Grass - Cliff)
-            CreateTerrainObject("MainCoralIsland", mainIslandMesh, terrainMat, Vector3.zero);
-            CreateTerrainObject("CrystalReefIsland", crystalIslandMesh, terrainMat, new Vector3(34f, 0f, 22f));
+            // 2.000m x 2.000m Continent Generator (16x16 Chunks, 5 Biomes, Deterministic Streaming)
+            var continentGo = new GameObject("IslandWorldUpgrader_2000m");
+            var islandUpgrader = continentGo.AddComponent<IslandGraphicsUpgrader>();
+            var upgraderSo = new SerializedObject(islandUpgrader);
+            upgraderSo.FindProperty("existingOceanTransform").objectReferenceValue = oceanGo.transform;
+            upgraderSo.FindProperty("continentTerrainMaterial").objectReferenceValue = terrainMat;
+            upgraderSo.FindProperty("oceanWaterMaterial").objectReferenceValue = oceanMat;
+            upgraderSo.FindProperty("glowingCrystalMaterial").objectReferenceValue = crystalMat;
+            upgraderSo.FindProperty("altarPrefab").objectReferenceValue = null;
+            upgraderSo.FindProperty("chestPrefab").objectReferenceValue = chestPrefab;
+            upgraderSo.FindProperty("lampPrefab").objectReferenceValue = lampPrefab;
+            upgraderSo.FindProperty("floorPrefab").objectReferenceValue = floorPrefab;
+            upgraderSo.ApplyModifiedPropertiesWithoutUndo();
 
-            // Tidal Crystal Cave Gate positioned at shallow lagoon channel between islands
-            float gateGroundY = EvaluateMainIslandHeight(18f, 11f);
+            // Tidal Crystal Cave Gate positioned near starter lagoon coast
+            float gateGroundY = IslandGraphicsUpgrader.EvaluateWorldHeightStatic(18f, 11f);
             GameObject caveGateGo = InstantiateKayKitModel($"{KayKitSpaceDir}/structure_low.fbx", null, spaceMat);
             caveGateGo.name = "TidalCrystalCaveGate";
             caveGateGo.transform.position = new Vector3(18f, Mathf.Max(0.4f, gateGroundY), 11f);
@@ -1480,7 +1491,7 @@ namespace CoralArchipelago.EditorTools
             worldMgrs.AddComponent<SharedCampLogManager>();
 
             // Island Core Altar (KayKit drill_structure + Glowing Crystal Spire + Warm/Cyan Point Light)
-            float altarY = EvaluateMainIslandHeight(-4.5f, 4.5f);
+            float altarY = IslandGraphicsUpgrader.EvaluateWorldHeightStatic(-4.5f, 4.5f);
             var altarRoot = new GameObject("IslandCoreAltar");
             altarRoot.transform.position = new Vector3(-4.5f, altarY, 4.5f);
             altarRoot.AddComponent<NetworkObject>();
@@ -1511,14 +1522,14 @@ namespace CoralArchipelago.EditorTools
             altarLight.shadows = LightShadows.None;
 
             // Starter Camp Shared Chest sitting cleanly on flat camp ground
-            float chestY = EvaluateMainIslandHeight(-1.5f, 4.5f);
+            float chestY = IslandGraphicsUpgrader.EvaluateWorldHeightStatic(-1.5f, 4.5f);
             GameObject starterChest = (GameObject)PrefabUtility.InstantiatePrefab(chestPrefab);
             starterChest.transform.position = new Vector3(-1.5f, chestY, 4.5f);
             var chestSo = new SerializedObject(starterChest.GetComponent<SharedChestInventory>());
             chestSo.FindProperty("sceneFallbackChestGuid").stringValue = "starter_camp_chest_01";
             chestSo.ApplyModifiedPropertiesWithoutUndo();
 
-            // Tropical Palm Trees & Crystal Clusters snapped exactly onto 3D Island Surface
+            // Harvestable Tropical Palm Trees across Starter Bay & Ancient Rainforest
             Vector2[] woodCoords =
             {
                 new Vector2(6f, 5f),
@@ -1526,59 +1537,58 @@ namespace CoralArchipelago.EditorTools
                 new Vector2(9f, -9f),
                 new Vector2(-12f, 10f),
                 new Vector2(4f, 14f),
-                new Vector2(14f, -4f)
+                new Vector2(14f, -4f),
+                new Vector2(-180f, 35f),
+                new Vector2(-210f, 65f)
             };
             for (int i = 0; i < woodCoords.Length; i++)
             {
                 float wx = woodCoords[i].x;
                 float wz = woodCoords[i].y;
-                float wy = EvaluateMainIslandHeight(wx, wz);
+                float wy = IslandGraphicsUpgrader.EvaluateWorldHeightStatic(wx, wz);
                 GameObject n = (GameObject)PrefabUtility.InstantiatePrefab(woodNodePrefab);
                 n.transform.position = new Vector3(wx, wy, wz);
                 n.transform.rotation = Quaternion.Euler(0f, i * 58f, 0f);
             }
 
-            Vector2[] mainCrystalCoords =
+            // Harvestable BioGlow Crystal Clusters across Starter Bay, Crystal Canyon, Mangrove Swamp & Volcanic Trail
+            Vector2[] crystalCoords =
             {
                 new Vector2(13f, -2f),
                 new Vector2(-5f, -15f),
-                new Vector2(-16f, 3f)
+                new Vector2(-16f, 3f),
+                new Vector2(32f, 20f),
+                new Vector2(37f, 25f),
+                new Vector2(375f, 38f),
+                new Vector2(390f, 52f),
+                new Vector2(255f, -255f)
             };
-            for (int i = 0; i < mainCrystalCoords.Length; i++)
+            for (int i = 0; i < crystalCoords.Length; i++)
             {
-                float cx = mainCrystalCoords[i].x;
-                float cz = mainCrystalCoords[i].y;
-                float cy = EvaluateMainIslandHeight(cx, cz);
+                float cx = crystalCoords[i].x;
+                float cz = crystalCoords[i].y;
+                float cy = IslandGraphicsUpgrader.EvaluateWorldHeightStatic(cx, cz);
                 GameObject n = (GameObject)PrefabUtility.InstantiatePrefab(crystalNodePrefab);
                 n.transform.position = new Vector3(cx, cy, cz);
                 n.transform.rotation = Quaternion.Euler(0f, i * 72f, 0f);
             }
 
-            Vector2[] reefCrystalCoords =
+            // Skeleton Guardian Monsters across starter zone & outer biomes
+            Vector2[] monsterCoords =
             {
-                new Vector2(32f, 20f),
-                new Vector2(37f, 25f)
+                new Vector2(12f, 12f),
+                new Vector2(-13f, -12f),
+                new Vector2(34f, 22f),
+                new Vector2(370f, 42f),
+                new Vector2(0f, 455f)
             };
-            for (int i = 0; i < reefCrystalCoords.Length; i++)
+            for (int i = 0; i < monsterCoords.Length; i++)
             {
-                float rx = reefCrystalCoords[i].x;
-                float rz = reefCrystalCoords[i].y;
-                float ry = EvaluateCrystalIslandHeight(rx, rz);
-                GameObject n = (GameObject)PrefabUtility.InstantiatePrefab(crystalNodePrefab);
-                n.transform.position = new Vector3(rx, ry, rz);
-            }
-
-            // Skeleton Guardian Monsters
-            Vector3[] monsterPositions =
-            {
-                new Vector3(12f, EvaluateMainIslandHeight(12f, 12f), 12f),
-                new Vector3(-13f, EvaluateMainIslandHeight(-13f, -12f), -12f),
-                new Vector3(34f, EvaluateCrystalIslandHeight(34f, 22f), 22f)
-            };
-            for (int i = 0; i < monsterPositions.Length; i++)
-            {
+                float mx = monsterCoords[i].x;
+                float mz = monsterCoords[i].y;
+                float my = IslandGraphicsUpgrader.EvaluateWorldHeightStatic(mx, mz);
                 GameObject m = (GameObject)PrefabUtility.InstantiatePrefab(monsterPrefab);
-                m.transform.position = monsterPositions[i];
+                m.transform.position = new Vector3(mx, my, mz);
             }
 
             // Environment Controller (Ocean Tide + Day/Night Fog + Biolum Spore Particles)
@@ -1731,12 +1741,19 @@ namespace CoralArchipelago.EditorTools
             var craftUi = hud.gameObject.AddComponent<CraftingPanelUI>();
             var tutorialUi = hud.gameObject.AddComponent<OnboardingTutorialUI>();
             var diagUi = hud.gameObject.AddComponent<DiagnosticsAndTestOverlayUI>();
+            var mapUi = hud.gameObject.AddComponent<WorldMinimapAndCompassUI>();
 
             // Top-Center Glassmorphism Vitals & Status Pill
             GameObject statusCard = CreateGlassPanel("StatusPillCard", hud.transform, glassCardSprite, new Color(0.05f, 0.11f, 0.20f, 0.72f));
             SetAnchorTopCenter(statusCard.GetComponent<RectTransform>(), 0f, -12f, 780f, 64f);
             Text statusText = CreateUiText("HudStatusText", statusCard.transform, "Connecting...", 16, TextAnchor.MiddleCenter, new Color(0.94f, 0.98f, 1.0f));
             StretchRect(statusText.rectTransform, 18f, 6f, 18f, 6f);
+
+            // Top-Center Glassmorphism Compass Bar
+            GameObject compassCard = CreateGlassPanel("CompassBarCard", hud.transform, glassCardSprite, new Color(0.04f, 0.12f, 0.22f, 0.70f));
+            SetAnchorTopCenter(compassCard.GetComponent<RectTransform>(), 0f, -82f, 620f, 34f);
+            Text compassText = CreateUiText("CompassHeadingText", compassCard.transform, "N 000\u00b0 | Ahead: Altar Camp (0m)", 14, TextAnchor.MiddleCenter, new Color(0.54f, 0.96f, 1.0f));
+            StretchRect(compassText.rectTransform, 14f, 3f, 14f, 3f);
 
             // Top-Left Onboarding Tutorial Card
             GameObject tutPanel = CreateGlassPanel("TutorialPanelRoot", hud.transform, glassCardSprite, new Color(0.05f, 0.13f, 0.24f, 0.76f));
@@ -1764,6 +1781,47 @@ namespace CoralArchipelago.EditorTools
             SetAnchorTopLeft(campLogCard.GetComponent<RectTransform>(), 16f, -176f, 430f, 96f);
             Text campLogText = CreateUiText("CampLogText", campLogCard.transform, "Camp Log...", 13, TextAnchor.UpperLeft, new Color(0.76f, 0.95f, 1.0f));
             StretchRect(campLogText.rectTransform, 14f, 10f, 14f, 10f);
+
+            // Top-Left Glassmorphism 2000m Open-World Minimap
+            GameObject minimapCard = CreateGlassPanel("MinimapCard", hud.transform, glassCardSprite, new Color(0.04f, 0.11f, 0.20f, 0.74f));
+            SetAnchorTopLeft(minimapCard.GetComponent<RectTransform>(), 16f, -280f, 216f, 248f);
+
+            Text minimapHeader = CreateUiText("MinimapTitleText", minimapCard.transform, "WORLD MAP 2000m", 12, TextAnchor.MiddleCenter, new Color(0.55f, 0.94f, 1.0f));
+            SetRect(minimapHeader.rectTransform, 0f, 110f, 196f, 20f);
+
+            var minimapViewportGo = new GameObject("MinimapViewport", typeof(RectTransform), typeof(RawImage), typeof(Mask));
+            minimapViewportGo.transform.SetParent(minimapCard.transform, false);
+            SetRect(minimapViewportGo.GetComponent<RectTransform>(), 0f, 4f, 184f, 184f);
+            RawImage minimapRaw = minimapViewportGo.GetComponent<RawImage>();
+            minimapRaw.color = Color.white;
+            minimapViewportGo.GetComponent<Mask>().showMaskGraphic = true;
+
+            RectTransform[] landmarkPins = new RectTransform[5];
+            landmarkPins[0] = CreateMinimapPin(minimapViewportGo.transform, "Pin_AltarCamp", "Altar", new Color(0.24f, 0.96f, 0.90f, 1f), glassCircleSprite);
+            landmarkPins[1] = CreateMinimapPin(minimapViewportGo.transform, "Pin_Rainforest", "Forest", new Color(0.32f, 0.88f, 0.36f, 1f), glassCircleSprite);
+            landmarkPins[2] = CreateMinimapPin(minimapViewportGo.transform, "Pin_CrystalCanyon", "Crystal", new Color(0.30f, 0.80f, 1.00f, 1f), glassCircleSprite);
+            landmarkPins[3] = CreateMinimapPin(minimapViewportGo.transform, "Pin_MangroveSwamp", "Swamp", new Color(0.68f, 0.88f, 0.38f, 1f), glassCircleSprite);
+            landmarkPins[4] = CreateMinimapPin(minimapViewportGo.transform, "Pin_VolcanicTemple", "Volcano", new Color(1.00f, 0.52f, 0.18f, 1f), glassCircleSprite);
+
+            GameObject playerPinGo = CreateGlassPanel("PlayerMarkerPin", minimapViewportGo.transform, glassCircleSprite, new Color(1.0f, 0.96f, 0.36f, 1f));
+            RectTransform playerPinRt = playerPinGo.GetComponent<RectTransform>();
+            playerPinRt.sizeDelta = new Vector2(14f, 14f);
+
+            Text coordsBiomeText = CreateUiText("CoordsAndBiomeText", minimapCard.transform, "(0, 0) | Altar Coral Bay", 11, TextAnchor.MiddleCenter, new Color(0.90f, 0.96f, 1.0f));
+            SetRect(coordsBiomeText.rectTransform, 0f, -108f, 200f, 22f);
+
+            var mapSo = new SerializedObject(mapUi);
+            mapSo.FindProperty("minimapMapImage").objectReferenceValue = minimapRaw;
+            mapSo.FindProperty("playerMarkerRect").objectReferenceValue = playerPinRt;
+            SerializedProperty pinsProp = mapSo.FindProperty("landmarkMarkerRects");
+            pinsProp.arraySize = landmarkPins.Length;
+            for (int i = 0; i < landmarkPins.Length; i++)
+            {
+                pinsProp.GetArrayElementAtIndex(i).objectReferenceValue = landmarkPins[i];
+            }
+            mapSo.FindProperty("coordsAndBiomeText").objectReferenceValue = coordsBiomeText;
+            mapSo.FindProperty("compassHeadingText").objectReferenceValue = compassText;
+            mapSo.ApplyModifiedPropertiesWithoutUndo();
 
             // Virtual Joystick (Bottom-Left Glass Circle)
             GameObject joyBg = CreateGlassPanel("JoystickBg", hud.transform, glassCircleSprite, new Color(0.75f, 0.94f, 1.0f, 0.24f));
@@ -2073,6 +2131,24 @@ namespace CoralArchipelago.EditorTools
             go.transform.SetParent(parent, false);
             ApplySlicedSprite(go.GetComponent<Image>(), sprite, tintColor);
             return go;
+        }
+
+        private static RectTransform CreateMinimapPin(
+            Transform viewport,
+            string name,
+            string shortLabel,
+            Color pinColor,
+            Sprite circleSprite)
+        {
+            GameObject pin = CreateGlassPanel(name, viewport, circleSprite, pinColor);
+            RectTransform rt = pin.GetComponent<RectTransform>();
+            rt.sizeDelta = new Vector2(10f, 10f);
+
+            Text label = CreateUiText("Label", pin.transform, shortLabel, 9, TextAnchor.LowerCenter, pinColor);
+            RectTransform labelRt = label.rectTransform;
+            labelRt.anchoredPosition = new Vector2(0f, -9f);
+            labelRt.sizeDelta = new Vector2(54f, 14f);
+            return rt;
         }
 
         private static GameObject CreateGridContainer(string name, Transform parent, Vector2 pos, Vector2 size, int cols)

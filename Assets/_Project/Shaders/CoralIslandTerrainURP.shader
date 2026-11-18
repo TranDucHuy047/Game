@@ -17,6 +17,7 @@ Shader "CoralArchipelago/URP/CoralIslandTerrainURP"
         [HDR] _BioVeinColor ("Night Rock Vein Glow", Color) = (0.06, 1.15, 1.50, 1)
         _SlopeThreshold ("Cliff Slope Threshold", Range(0.3, 0.95)) = 0.76
         _BlendSharpness ("Biome Blend Width", Range(0.05, 1.5)) = 0.45
+        _UseVertexBiomeColor ("Use Biome Vertex Colors", Range(0.0, 1.0)) = 0.0
     }
 
     SubShader
@@ -46,6 +47,7 @@ Shader "CoralArchipelago/URP/CoralIslandTerrainURP"
             #pragma multi_compile _ _ADDITIONAL_LIGHTS_VERTEX _ADDITIONAL_LIGHTS
             #pragma multi_compile _ _SHADOWS_SOFT
             #pragma multi_compile_fog
+            #pragma multi_compile_instancing
 
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Lighting.hlsl"
@@ -64,12 +66,15 @@ Shader "CoralArchipelago/URP/CoralIslandTerrainURP"
                 half4 _BioVeinColor;
                 half _SlopeThreshold;
                 half _BlendSharpness;
+                half _UseVertexBiomeColor;
             CBUFFER_END
 
             struct Attributes
             {
                 float4 positionOS : POSITION;
                 float3 normalOS : NORMAL;
+                float4 color : COLOR;
+                UNITY_VERTEX_INPUT_INSTANCE_ID
             };
 
             struct Varyings
@@ -78,11 +83,16 @@ Shader "CoralArchipelago/URP/CoralIslandTerrainURP"
                 float3 positionWS : TEXCOORD0;
                 half3 normalWS : TEXCOORD1;
                 half fogFactor : TEXCOORD2;
+                half4 vertexColor : TEXCOORD3;
+                UNITY_VERTEX_INPUT_INSTANCE_ID
             };
 
             Varyings vert(Attributes input)
             {
                 Varyings output;
+                UNITY_SETUP_INSTANCE_ID(input);
+                UNITY_TRANSFER_INSTANCE_ID(input, output);
+
                 VertexPositionInputs posInputs = GetVertexPositionInputs(input.positionOS.xyz);
                 VertexNormalInputs normInputs = GetVertexNormalInputs(input.normalOS);
 
@@ -90,6 +100,7 @@ Shader "CoralArchipelago/URP/CoralIslandTerrainURP"
                 output.positionWS = posInputs.positionWS;
                 output.normalWS = (half3)normalize(normInputs.normalWS);
                 output.fogFactor = (half)ComputeFogFactor(posInputs.positionCS.z);
+                output.vertexColor = (half4)input.color;
                 return output;
             }
 
@@ -100,6 +111,7 @@ Shader "CoralArchipelago/URP/CoralIslandTerrainURP"
 
             half4 frag(Varyings input) : SV_Target
             {
+                UNITY_SETUP_INSTANCE_ID(input);
                 half3 normalWS = normalize(input.normalWS);
                 float h = input.positionWS.y;
 
@@ -127,6 +139,11 @@ Shader "CoralArchipelago/URP/CoralIslandTerrainURP"
 
                 half3 albedo = lerp(sandCol, grassCol, grassMask);
                 albedo = lerp(albedo, rockCol, rockMask);
+
+                // 5-Biome vertex colors for 2000m continent chunks
+                half3 biomeTint = input.vertexColor.rgb * lerp(0.86h, 1.14h, noise);
+                biomeTint = lerp(biomeTint, rockCol * 0.92h, slopeRockMask * 0.55h);
+                albedo = lerp(albedo, biomeTint, saturate(_UseVertexBiomeColor));
 
                 // Main directional light + soft shadows
                 float4 shadowCoord = TransformWorldToShadowCoord(input.positionWS);
@@ -188,6 +205,7 @@ Shader "CoralArchipelago/URP/CoralIslandTerrainURP"
                 half4 _BioVeinColor;
                 half _SlopeThreshold;
                 half _BlendSharpness;
+                half _UseVertexBiomeColor;
             CBUFFER_END
 
             float3 _LightDirection;
@@ -253,6 +271,7 @@ Shader "CoralArchipelago/URP/CoralIslandTerrainURP"
                 half4 _BioVeinColor;
                 half _SlopeThreshold;
                 half _BlendSharpness;
+                half _UseVertexBiomeColor;
             CBUFFER_END
 
             struct Attributes

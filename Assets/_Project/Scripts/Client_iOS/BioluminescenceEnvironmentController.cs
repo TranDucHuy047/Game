@@ -19,8 +19,8 @@ namespace CoralArchipelago.ClientIOS
         [Header("Day / Night Atmosphere")]
         [SerializeField] private Color dayFogColor = new Color(0.55f, 0.80f, 0.92f, 1f);
         [SerializeField] private Color nightFogColor = new Color(0.02f, 0.07f, 0.18f, 1f);
-        [SerializeField] private float dayFogDensity = 0.0045f;
-        [SerializeField] private float nightFogDensity = 0.0085f;
+        [SerializeField] private float dayFogDensity = 0.00065f;
+        [SerializeField] private float nightFogDensity = 0.00085f;
         [SerializeField] private Color dayAmbientColor = new Color(0.52f, 0.62f, 0.72f, 1f);
         [SerializeField] private Color nightAmbientColor = new Color(0.06f, 0.16f, 0.28f, 1f);
 
