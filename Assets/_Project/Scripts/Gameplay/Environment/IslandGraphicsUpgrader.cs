@@ -667,6 +667,11 @@ public class IslandGraphicsUpgrader : MonoBehaviour
     // =========================================================================
     // 4. DETERMINISTIC CHUNK STREAMING (PROPS <= 260m, COLLIDERS <= 420m)
     // =========================================================================
+    public void RefreshStreamingNow()
+    {
+        UpdateChunkStreamingAndUpgradePrimitives();
+    }
+
     private void UpdateChunkStreamingAndUpgradePrimitives()
     {
         if (!_isHeadlessServer)
@@ -1103,13 +1108,20 @@ public class IslandGraphicsUpgrader : MonoBehaviour
             target.GetComponentInParent<IslandCoreAltar>() != null ||
             target.GetComponentInParent<SharedChestInventory>() != null ||
             target.GetComponentInParent<TidalCrystalCaveGate>() != null ||
-            target.GetComponentInParent<NetworkPlayerController>() != null)
+            target.GetComponentInParent<NetworkPlayerController>() != null ||
+            target.GetComponentInParent<global::IslandFastTravelAndRaftSystem>() != null ||
+            target.GetComponentInParent<global::IslandRelicAndVolcanoBossSystem>() != null)
         {
             return true;
         }
 
         string rootName = target.root.name;
-        return rootName.StartsWith("PF_") || rootName.Contains("Temple");
+        return rootName.StartsWith("PF_") ||
+               rootName.Contains("Temple") ||
+               rootName.Contains("Portal") ||
+               rootName.Contains("Raft") ||
+               rootName.Contains("Relic") ||
+               rootName.Contains("Boss");
     }
 
     private void ReplaceWithVisualModel(GameObject target, MeshRenderer originalRenderer, GameObject customPrefab, Action<Transform> proceduralFallbackBuilder)

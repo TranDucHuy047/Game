@@ -82,6 +82,32 @@ namespace CoralArchipelago.EditorTools
             GenerateFullProjectSetupInternal(openBootstrapScene: true);
         }
 
+        [MenuItem("Coral Archipelago/Attach 2000m Continent + Portals + Boss Systems to Active Scene")]
+        public static void AttachContinentSystemsToActiveScene()
+        {
+            Scene activeScene = SceneManager.GetActiveScene();
+            if (!activeScene.IsValid())
+                return;
+
+            GameObject hostGo = GameObject.Find("IslandWorldUpgrader_2000m");
+            if (hostGo == null)
+            {
+                IslandGraphicsUpgrader existing = Object.FindFirstObjectByType<IslandGraphicsUpgrader>();
+                hostGo = existing != null ? existing.gameObject : new GameObject("IslandWorldUpgrader_2000m");
+            }
+
+            if (hostGo.GetComponent<IslandGraphicsUpgrader>() == null)
+                hostGo.AddComponent<IslandGraphicsUpgrader>();
+            if (hostGo.GetComponent<IslandFastTravelAndRaftSystem>() == null)
+                hostGo.AddComponent<IslandFastTravelAndRaftSystem>();
+            if (hostGo.GetComponent<IslandRelicAndVolcanoBossSystem>() == null)
+                hostGo.AddComponent<IslandRelicAndVolcanoBossSystem>();
+
+            EditorSceneManager.MarkSceneDirty(activeScene);
+            Selection.activeGameObject = hostGo;
+            Debug.Log("[CoralProjectAutoBuilder] Attached IslandGraphicsUpgrader, IslandFastTravelAndRaftSystem & IslandRelicAndVolcanoBossSystem to active scene.");
+        }
+
         /// <summary>
         /// CLI / GitHub Actions entry point to generate all upgraded 3D assets/scenes and export iOS Xcode.
         /// </summary>
@@ -1459,6 +1485,8 @@ namespace CoralArchipelago.EditorTools
             upgraderSo.FindProperty("lampPrefab").objectReferenceValue = lampPrefab;
             upgraderSo.FindProperty("floorPrefab").objectReferenceValue = floorPrefab;
             upgraderSo.ApplyModifiedPropertiesWithoutUndo();
+            continentGo.AddComponent<IslandFastTravelAndRaftSystem>();
+            continentGo.AddComponent<IslandRelicAndVolcanoBossSystem>();
 
             // Tidal Crystal Cave Gate positioned near starter lagoon coast
             float gateGroundY = IslandGraphicsUpgrader.EvaluateWorldHeightStatic(18f, 11f);

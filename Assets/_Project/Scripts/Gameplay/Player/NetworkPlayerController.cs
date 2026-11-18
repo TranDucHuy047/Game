@@ -62,6 +62,9 @@ namespace CoralArchipelago.Gameplay.Player
         private bool _serverSprinting;
         private float _verticalVelocity;
         private float _serverActionTimer;
+        private bool _isMountedOnRaft;
+        private float _mountSyncTimer;
+        private bool _lastSentMountedState;
 
         // Client camera & input throttling state
         private float _clientYaw;
@@ -238,7 +241,7 @@ namespace CoralArchipelago.Gameplay.Player
 
         private void SimulateServerMovement()
         {
-            if (_characterController == null || !_characterController.enabled)
+            if (_isMountedOnRaft || _characterController == null || !_characterController.enabled)
                 return;
 
             if (_characterController.isGrounded && _verticalVelocity < 0f)
@@ -311,6 +314,52 @@ namespace CoralArchipelago.Gameplay.Player
                 return;
 
             PerformPrimaryActionServerRpc(transform.forward);
+            global::IslandRelicAndVolcanoBossSystem.Instance?.TryPlayerAttackBossFromHUD();
+        }
+
+        public void RequestTeleportToPosition(Vector3 targetPosition)
+        {
+            if (_characterController != null) _characterController.enabled = false;
+            transform.position = targetPosition;
+            _verticalVelocity = 0f;
+            if (_characterController != null) _characterController.enabled = true;
+
+            if (IsOwner && IsSpawned && !IsServer)
+            {
+                TeleportToPositionServerRpc(targetPosition);
+            }
+        }
+
+        public void SyncExternalMountPosition(Vector3 worldPos, float yaw, bool isMounted)
+        {
+            _isMountedOnRaft = isMounted;
+            if (_characterController != null && _characterController.enabled == isMounted)
+            {
+                _characterController.enabled = !isMounted;
+            }
+
+            transform.position = worldPos;
+            transform.rotation = Quaternion.Euler(0f, yaw, 0f);
+            _verticalVelocity = 0f;
+
+            if (IsOwner && IsSpawned && !IsServer)
+            {
+                _mountSyncTimer += Time.deltaTime;
+                if (isMounted != _lastSentMountedState || _mountSyncTimer >= 0.05f)
+                {
+                    _lastSentMountedState = isMounted;
+                    _mountSyncTimer = 0f;
+                    SyncMountStateServerRpc(worldPos, yaw, isMounted);
+                }
+            }
+        }
+
+        public void RequestBossAoEDamage(float damage)
+        {
+            if (damage <= 0f || !IsOwner || !IsSpawned)
+                return;
+
+            ApplyBossAoEDamageServerRpc(damage);
         }
 
         public void RequestBuildInFront(string prefabId)
@@ -422,6 +471,34 @@ namespace CoralArchipelago.Gameplay.Player
         private void EmergencySavePlayerServerRpc()
         {
             SplitSaveManager.Instance?.SavePlayerByClientId(OwnerClientId, removeFromActiveCache: false);
+        }
+
+        [ServerRpc]
+        private void TeleportToPositionServerRpc(Vector3 targetPosition)
+        {
+            if (_characterController != null) _characterController.enabled = false;
+            transform.position = targetPosition;
+            _verticalVelocity = 0f;
+            if (_characterController != null) _characterController.enabled = true;
+        }
+
+        [ServerRpc]
+        private void SyncMountStateServerRpc(Vector3 worldPos, float yaw, bool isMounted)
+        {
+            _isMountedOnRaft = isMounted;
+            if (_characterController != null && _characterController.enabled == isMounted)
+            {
+                _characterController.enabled = !isMounted;
+            }
+            transform.position = worldPos;
+            transform.rotation = Quaternion.Euler(0f, yaw, 0f);
+            _verticalVelocity = 0f;
+        }
+
+        [ServerRpc]
+        private void ApplyBossAoEDamageServerRpc(float damage)
+        {
+            TakeDamageServer(damage);
         }
 
         [ClientRpc]

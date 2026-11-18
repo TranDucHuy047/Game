@@ -100,20 +100,34 @@ namespace CoralArchipelago.ClientIOS
 
         public void OnClickSimulateAddPlayer()
         {
-            if (PvEDirector.Instance == null || !PvEDirector.Instance.IsServer)
-                return;
+            int next = PvEDirector.Instance != null
+                ? Mathf.Clamp(PvEDirector.Instance.ActivePlayerCount.Value + 1, 1, 10)
+                : (global::IslandRelicAndVolcanoBossSystem.Instance != null
+                    ? Mathf.Clamp(global::IslandRelicAndVolcanoBossSystem.Instance.currentOnlinePlayers + 1, 1, 10)
+                    : 1);
 
-            int next = Mathf.Clamp(PvEDirector.Instance.ActivePlayerCount.Value + 1, 1, 10);
-            PvEDirector.Instance.RecalculateDifficultyServer(next);
+            if (PvEDirector.Instance != null && PvEDirector.Instance.IsServer)
+            {
+                PvEDirector.Instance.RecalculateDifficultyServer(next);
+            }
+
+            global::IslandRelicAndVolcanoBossSystem.Instance?.RecalculateBossScaling(next);
         }
 
         public void OnClickSimulateRemovePlayer()
         {
-            if (PvEDirector.Instance == null || !PvEDirector.Instance.IsServer)
-                return;
+            int next = PvEDirector.Instance != null
+                ? Mathf.Clamp(PvEDirector.Instance.ActivePlayerCount.Value - 1, 1, 10)
+                : (global::IslandRelicAndVolcanoBossSystem.Instance != null
+                    ? Mathf.Clamp(global::IslandRelicAndVolcanoBossSystem.Instance.currentOnlinePlayers - 1, 1, 10)
+                    : 1);
 
-            int next = Mathf.Clamp(PvEDirector.Instance.ActivePlayerCount.Value - 1, 1, 10);
-            PvEDirector.Instance.RecalculateDifficultyServer(next);
+            if (PvEDirector.Instance != null && PvEDirector.Instance.IsServer)
+            {
+                PvEDirector.Instance.RecalculateDifficultyServer(next);
+            }
+
+            global::IslandRelicAndVolcanoBossSystem.Instance?.RecalculateBossScaling(next);
         }
 
         public void OnClickSkipThreeWorldHours()
